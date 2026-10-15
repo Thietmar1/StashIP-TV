@@ -226,3 +226,17 @@ For manual execution, export the environment variables and run
 `node tvguide-server.js`. `FFMPEG_PATH` optionally selects a different FFmpeg binary.
 The default listen address is loopback. Export URLs support a `?token=` parameter;
 HTTP clients may alternatively send `Authorization: Bearer <TVGUIDE_TOKEN>`.
+
+## Node.js not found by Stash
+
+For Debian/LXC, the plugin task explicitly runs `/usr/bin/node`, the path provided
+by Debian's `nodejs` package. Stash otherwise falls back to `<pluginDir>/node` if
+its service PATH cannot resolve `node`. That fallback produces a misleading
+`fork/exec .../TVGuide/node: no such file or directory` error.
+
+Run `/usr/bin/node --version` inside the **Stash LXC**, rather than on the Proxmox
+host. If the file is missing, install `nodejs` in that LXC. Update TVGuide to 1.1.1
+or newer and reload plugins before running Start IPTV Server again. Installing
+Node through a user's nvm shell does not make it available to Stash's service.
+For another OS or a custom Node location, change the manifest's first `exec` entry
+to the absolute path of that Node executable; standalone operation is unchanged.

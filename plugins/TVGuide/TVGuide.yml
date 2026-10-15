@@ -1,11 +1,11 @@
 name: TV Guide
 description: Presents your library as live TV channels with a cable-style programme guide and optional M3U/XMLTV live streaming for Jellyfin.
-version: "1.1"
+version: "1.1.1"
 url: https://github.com/Thietmar1/hippo-stash-plugins/tree/main/plugins/TVGuide
 interface: raw
 errLog: info
 exec:
-  - node
+  - /usr/bin/node
   - "{pluginDir}/tvguide-server.js"
   - --plugin-task
 tasks:
