@@ -30,6 +30,11 @@ test('configuration validates secrets, URLs and resource limits', () => {
         assert.throws(() => readConfig({ TVGUIDE_TOKEN: 'a'.repeat(32), [key]: value }));
     }
     assert.equal(config.port, 9898);
+    assert.equal(config.firstChannelNumber, 12);
+    assert.equal(readConfig({ TVGUIDE_TOKEN: config.token, TVGUIDE_FIRST_CHANNEL_NUMBER: '100' }).firstChannelNumber, 100);
+    for (const value of ['0', '-1', '1.5', '1000000', 'not-a-number']) {
+        assert.throws(() => readConfig({ TVGUIDE_TOKEN: config.token, TVGUIDE_FIRST_CHANNEL_NUMBER: value }), /FIRST_CHANNEL_NUMBER/);
+    }
     assert.equal(stashMediaUrl(config, '/scene/1/stream'), 'http://stash:9999/scene/1/stream');
     assert.throws(() => stashMediaUrl(config, 'http://other/secret'));
 });

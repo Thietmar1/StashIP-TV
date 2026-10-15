@@ -102,11 +102,21 @@ function logoUrl(channel, config) {
     } catch { return null; }
 }
 
+/** Number the complete lineup before omitting empty channels. A temporarily
+ * empty channel reserves its number, so the others do not move every day. */
+export function numberChannels(channels, first = 12) {
+    return channels.map((channel, index) => ({ ...channel, number: first + index }));
+}
+
+function channelNumber(channel, index, config) {
+    return channel.number ?? (config.firstChannelNumber ?? 12) + index;
+}
+
 export function renderM3u(channels, config) {
     const lines = [`#EXTM3U x-tvg-url="${endpoint(config, '/epg.xml')}"`];
-    for (const channel of channels) {
+    for (const [index, channel] of channels.entries()) {
         const logo = logoUrl(channel, config);
-        lines.push(`#EXTINF:-1 tvg-id="${m3uText(channel.id)}" tvg-name="${m3uText(channel.name)}"${logo ? ` tvg-logo="${m3uText(logo)}"` : ''} group-title="${m3uText(SOURCE_LABELS[channel.source] || 'TVGuide')}",${m3uText(channel.name)}`);
+        lines.push(`#EXTINF:-1 tvg-id="${m3uText(channel.id)}" tvg-chno="${channelNumber(channel, index, config)}" tvg-name="${m3uText(channel.name)}"${logo ? ` tvg-logo="${m3uText(logo)}"` : ''} group-title="${m3uText(SOURCE_LABELS[channel.source] || 'TVGuide')}",${m3uText(channel.name)}`);
         lines.push(endpoint(config, `/stream/${encodeURIComponent(channel.id)}.ts`));
     }
     return lines.join('\n') + '\n';
@@ -115,9 +125,9 @@ export function renderM3u(channels, config) {
 /** Walk without the browser grid's 500-programme cap. Never silently truncate. */
 export async function renderXmltv(guide, channels, config, fromMs, toMs) {
     const lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<tv generator-info-name="Stash TVGuide">'];
-    for (const channel of channels) {
+    for (const [index, channel] of channels.entries()) {
         const logo = logoUrl(channel, config);
-        lines.push(`<channel id="${xml(channel.id)}"><display-name>${xml(channel.name)}</display-name>${logo ? `<icon src="${xml(logo)}"/>` : ''}</channel>`);
+        lines.push(`<channel id="${xml(channel.id)}"><display-name>${xml(channel.name)}</display-name><display-name>${channelNumber(channel, index, config)}</display-name>${logo ? `<icon src="${xml(logo)}"/>` : ''}</channel>`);
     }
     for (const channel of channels) {
         let cursor = fromMs;
@@ -151,3 +161,4 @@ export async function playableChannels(guide, nowMs) {
     }
     return out;
 }
+

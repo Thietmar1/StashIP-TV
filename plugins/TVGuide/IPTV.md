@@ -57,6 +57,7 @@ Open TVGuide's plugin settings and set:
 | IPTV Port | `9898`; match the Public URL (zero/empty also uses 9898 in 1.1.2+) |
 | IPTV Guide Days | `3` (zero/empty also uses 3 in 1.1.2+) |
 | IPTV Maximum Streams | `2` (zero/empty also uses 2 in 1.1.2+) |
+| IPTV First Channel Number | `12` (default; reserves 1–11 for existing channels) |
 
 Leave **IPTV Stash URL** empty to use Stash's local task connection. If Stash returns
 media URLs using an external origin, set this field to that same reachable origin.
@@ -161,6 +162,7 @@ TVGUIDE_PUBLIC_URL=http://192.168.1.50:9898
 TVGUIDE_TOKEN=PASTE_THE_GENERATED_TOKEN_HERE
 TVGUIDE_EPG_DAYS=3
 TVGUIDE_MAX_STREAMS=2
+TVGUIDE_FIRST_CHANNEL_NUMBER=12
 TZ=Europe/Berlin
 ```
 
@@ -210,6 +212,34 @@ In **Dashboard → Live TV**:
 5. Open Live TV and tune a channel. Confirm both the current show and a programme
    transition. The companion has no direct access to your Jellyfin installation;
    these installation-specific checks must run on your servers.
+
+### Channel numbers and EPG matching (1.1.7+)
+
+Set **IPTV First Channel Number** to 12 to keep 1–11 for your existing tuners.
+The M3U carries `tvg-chno="12"`, `13`, and so on. XMLTV carries the same numbers
+as additional numeric `display-name` entries, which Jellyfin's XMLTV parser reads
+as channel numbers. Channel IDs remain unchanged, so existing XMLTV mappings do
+not depend on the numbers. Numbering follows the full TVGuide lineup, including
+pins and hidden-channel preferences. An empty channel reserves its number rather
+than shifting later channels. Changing lineup order can change the numbers.
+
+After installing an update or changing settings, run **Stop IPTV Server**, then
+**Start IPTV Server**. Refresh the Jellyfin tuner and guide data. The XMLTV source
+must be added separately; the M3U guide URL hint does not replace that setup.
+If XMLTV returns HTTP 200 but Jellyfin has no programme data, open the XMLTV
+provider's **Map Channels** and assign each TVGuide channel to the same named
+XMLTV channel. Limit that provider to the TVGuide tuner when you have other
+providers/tuners, then refresh guide data. Re-save the XMLTV provider if Jellyfin
+is still using data cached before a server fix. Channel numbering alone does
+not repair missing manual mappings.
+
+### Native Stash apps
+
+See the [native app integration assessment](https://github.com/Thietmar1/hippo-stash-plugins/blob/main/plugins/TVGuide/NATIVE-APPS.md)
+for Stashy iOS/tvOS.
+The running TVGuide server already provides the schedule and streams over
+M3U/XMLTV; a native app must explicitly consume them. Installing the Stash plugin
+does not add a native screen to an existing app.
 
 See the [official Jellyfin setup guide](https://jellyfin.org/docs/general/server/live-tv/setup-guide/)
 for the M3U tuner and XMLTV provider screens.

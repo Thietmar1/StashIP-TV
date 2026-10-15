@@ -43,16 +43,18 @@ test('Stash NUMBER defaults of zero or blank use documented defaults without acc
         plugins: { TVGuide: { ...settings, ...values } }, general: {}
     } }) });
     for (const value of [0, '0', '', '  ', null, undefined]) {
-        const config = await configured({ iptv_06_port: value, iptv_07_epg_days: value, iptv_08_max_streams: value });
+        const config = await configured({ iptv_06_port: value, iptv_07_epg_days: value, iptv_08_max_streams: value, iptv_11_first_channel_number: value });
         assert.equal(config.port, 9898);
         assert.equal(config.days, 3);
         assert.equal(config.maxStreams, 2);
+        assert.equal(config.firstChannelNumber, 12);
     }
-    const custom = await configured({ iptv_06_port: 9000, iptv_07_epg_days: 7, iptv_08_max_streams: 4 });
+    const custom = await configured({ iptv_06_port: 9000, iptv_07_epg_days: 7, iptv_08_max_streams: 4, iptv_11_first_channel_number: 42 });
     assert.equal(custom.port, 9000);
     assert.equal(custom.days, 7);
     assert.equal(custom.maxStreams, 4);
-    for (const [key, value] of [['iptv_06_port', -1], ['iptv_07_epg_days', 8], ['iptv_08_max_streams', 'invalid']]) {
+    assert.equal(custom.firstChannelNumber, 42);
+    for (const [key, value] of [['iptv_06_port', -1], ['iptv_07_epg_days', 8], ['iptv_08_max_streams', 'invalid'], ['iptv_11_first_channel_number', -1], ['iptv_11_first_channel_number', 1000000]]) {
         await assert.rejects(configured({ [key]: value }), /Invalid/);
     }
 });
