@@ -43,7 +43,8 @@ buildPlugin()
     
     pushd "$dir" > /dev/null
     find . -maxdepth 1 -type f \
-        \( -name "*.yml" -o -name "*.js" -o -name "*.css" -o -name "*.py" -o -name "*.sh" \) \
+        \( -name "*.yml" -o -name "*.js" -o -name "*.css" -o -name "*.py" -o -name "*.sh" \
+           -o -name "IPTV.md" -o -name "tvguide-iptv.service" \) \
         ! -name "*.config.js" \
         | zip "$zipfile" -@ > /dev/null
     popd > /dev/null

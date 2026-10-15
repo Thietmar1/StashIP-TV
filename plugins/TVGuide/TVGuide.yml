@@ -1,13 +1,76 @@
 name: TV Guide
-description: Presents your library as live TV channels with a cable-style programme guide. Channels are built from studios, tags, groups or saved filters, and every channel is always broadcasting.
-version: "1.0"
-url: https://github.com/hippochapel/hippo-stash-plugins/tree/main/plugins/TVGuide
+description: Presents your library as live TV channels with a cable-style programme guide and optional M3U/XMLTV live streaming for Jellyfin.
+version: "1.1"
+url: https://github.com/Thietmar1/hippo-stash-plugins/tree/main/plugins/TVGuide
+interface: raw
+errLog: info
+exec:
+  - node
+  - "{pluginDir}/tvguide-server.js"
+  - --plugin-task
+tasks:
+  - name: Start IPTV Server
+    description: Start the M3U/XMLTV live server in the background using the IPTV plugin settings. Requires Node.js 20+ and FFmpeg.
+    defaultArgs:
+      operation: start
+  - name: Stop IPTV Server
+    description: Stop the IPTV server and its active streams.
+    defaultArgs:
+      operation: stop
+  - name: Restart IPTV Server
+    description: Restart the IPTV server to apply changed settings or an installed plugin update.
+    defaultArgs:
+      operation: restart
+  - name: IPTV Server Status
+    description: Check the IPTV instance and return its M3U and XMLTV URLs in the task output.
+    defaultArgs:
+      operation: status
 ui:
   javascript:
     - tvguide.js
   css:
     - tvguide.css
 settings:
+  iptv_01_stash_url:
+    displayName: IPTV Stash URL
+    description: "Optional. Default is the local Stash task connection. Set this to match Stash's configured external media URL origin if needed."
+    type: STRING
+  iptv_02_api_key:
+    displayName: IPTV Stash API Key
+    description: "Recommended for long-running IPTV playback. Use your Stash API key from Settings > Security. If empty, the current Stash task session is used until it expires."
+    type: STRING
+  iptv_03_public_url:
+    displayName: IPTV Public URL
+    description: "Required. Address reachable from Jellyfin, e.g. http://192.168.1.50:9898 for the Stash LXC."
+    type: STRING
+  iptv_04_token:
+    displayName: IPTV Access Token
+    description: "Required. A separate random token of at least 24 letters/digits/hyphens/underscores. Append ?token=YOUR_TOKEN to the playlist and EPG URLs. Do not use your Stash API key."
+    type: STRING
+  iptv_05_host:
+    displayName: IPTV Listen Address
+    description: "Default 0.0.0.0 (LAN access). Use 127.0.0.1 for local access only."
+    type: STRING
+  iptv_06_port:
+    displayName: IPTV Port
+    description: "Default 9898. Must match the port in IPTV Public URL."
+    type: NUMBER
+  iptv_07_epg_days:
+    displayName: IPTV Guide Days
+    description: "Days of XMLTV listings including today. Default 3, range 1-7."
+    type: NUMBER
+  iptv_08_max_streams:
+    displayName: IPTV Maximum Streams
+    description: "Maximum concurrent FFmpeg viewers. Default 2, range 1-32."
+    type: NUMBER
+  iptv_09_timezone:
+    displayName: IPTV Timezone
+    description: "Use the TVGuide browser timezone, e.g. Europe/Berlin. Default is the Stash server's timezone."
+    type: STRING
+  iptv_10_ffmpeg:
+    displayName: IPTV FFmpeg Path
+    description: "Optional override. Otherwise uses Stash's FFmpeg path or ffmpeg from PATH."
+    type: STRING
   guide_01_12_hour_clock:
     displayName: Use 12-Hour Clock
     description: "Show times with AM/PM throughout TV Guide. Enabled by default. Reload the page after changing this setting."
