@@ -1,6 +1,6 @@
 name: TV Guide
 description: Presents your library as live TV channels with a cable-style programme guide and optional M3U/XMLTV live streaming for Jellyfin.
-version: "1.1.6"
+version: "1.1.7"
 url: https://github.com/Thietmar1/hippo-stash-plugins/tree/main/plugins/TVGuide
 interface: raw
 errLog: info
@@ -71,6 +71,10 @@ settings:
     displayName: IPTV FFmpeg Path
     description: "Optional override. Otherwise uses Stash's FFmpeg path or ffmpeg from PATH."
     type: STRING
+  iptv_11_first_channel_number:
+    displayName: IPTV First Channel Number
+    description: "First channel number in M3U and XMLTV. Default 12 (reserves 1-11 for existing tuners). Range 1-999999; zero/empty uses 12. Numbering follows the TVGuide lineup; empty channels reserve their number. Stop/start the IPTV server and refresh Jellyfin after changing this."
+    type: NUMBER
   guide_01_12_hour_clock:
     displayName: Use 12-Hour Clock
     description: "Show times with AM/PM throughout TV Guide. Enabled by default. Reload the page after changing this setting."

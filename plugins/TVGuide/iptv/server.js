@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { createStashClient, stashMediaUrl, stashHeaders, endpoint, StashRequestError } from './config.js';
-import { loadGuide, renderM3u, renderXmltv, playableChannels, nextMidnight } from './guide.js';
+import { loadGuide, renderM3u, renderXmltv, playableChannels, nextMidnight, numberChannels } from './guide.js';
 import { dayBucket } from '../src/domain/schedule.js';
 import { streamChannel } from './stream.js';
 
@@ -21,7 +21,9 @@ export function createIptvServer(config, { gql = createStashClient(config), load
     const getGuide = async () => {
         if (!snapshot || now() >= expires) {
             expires = Math.min(now() + 300000, nextMidnight(now()));
-            const pending = load(gql);
+            const pending = load(gql).then((guide) => ({
+                ...guide, channels: numberChannels(guide.channels, config.firstChannelNumber ?? 12)
+            }));
             snapshot = pending;
             epg = null;
             pending.catch(() => { if (snapshot === pending) snapshot = null; });
@@ -116,3 +118,4 @@ export function createIptvServer(config, { gql = createStashClient(config), load
     });
     return { server, getGuide, close() { server.close(); server.closeAllConnections(); } };
 }
+

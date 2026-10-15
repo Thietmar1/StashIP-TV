@@ -26,6 +26,7 @@ export function readConfig(env = process.env) {
         port: integer(env.TVGUIDE_PORT, 9898, 1, 65535, 'TVGUIDE_PORT'),
         days: integer(env.TVGUIDE_EPG_DAYS, 3, 1, 7, 'TVGUIDE_EPG_DAYS'),
         maxStreams: integer(env.TVGUIDE_MAX_STREAMS, 2, 1, 32, 'TVGUIDE_MAX_STREAMS'),
+        firstChannelNumber: integer(env.TVGUIDE_FIRST_CHANNEL_NUMBER, 12, 1, 999999, 'TVGUIDE_FIRST_CHANNEL_NUMBER'),
         ffmpeg: env.FFMPEG_PATH || 'ffmpeg',
         token
     };

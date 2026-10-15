@@ -53,6 +53,25 @@ test('real HTTP exports return matching channel IDs and valid content types', as
     assert.equal((await get('/stream/%xx.ts')).status, 400);
 });
 
+test('M3U and XMLTV share configurable channel numbers and reserve numbers for empty channels', async (t) => {
+    const channels = [1, 2, 3].map((id) => ({ ...channel, id: `studio:${id}`, name: `Studio ${id}` }));
+    const { get } = await setup(t, { load: async () => ({ ...guide, channels,
+        getPlan: async (item) => ({ totalMs: item.id === 'studio:2' ? 0 : 86400000 })
+    }) }, { firstChannelNumber: 12 });
+    const playlist = await (await get('/playlist.m3u')).text();
+    assert.match(playlist, /tvg-id="studio:1" tvg-chno="12"/);
+    assert.match(playlist, /tvg-id="studio:3" tvg-chno="14"/);
+    assert.ok(!playlist.includes('tvg-chno="13"'));
+    const epg = await (await get('/epg.xml')).text();
+    assert.match(epg, /<channel id="studio:1"><display-name>Studio 1<\/display-name><display-name>12<\/display-name>/);
+    assert.match(epg, /<channel id="studio:3"><display-name>Studio 3<\/display-name><display-name>14<\/display-name>/);
+    assert.match(epg, /<programme channel="studio:3"/);
+    assert.ok(!Object.hasOwn(channels[0], 'number'));
+    const custom = await setup(t, {}, { firstChannelNumber: 50 });
+    assert.match(await (await custom.get('/playlist.m3u')).text(), /tvg-chno="50"/);
+    assert.match(await (await custom.get('/epg.xml')).text(), /<display-name>50<\/display-name>/);
+});
+
 test('saved tags, Stash IDs and numeric/date ranges produce working M3U/XMLTV without invalid input fields', async (t) => {
     const requests = [];
     const saved = {
