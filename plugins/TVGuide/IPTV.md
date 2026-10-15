@@ -247,6 +247,8 @@ for the M3U tuner and XMLTV provider screens.
   Version 1.1.5 also logs GraphQL HTTP 400/422 explanations and their field paths.
   It fixes saved Stash-ID criteria being sent with an unsupported `value` field,
   which made playlists fail with `variable.filter.stash_id_endpoint.value`.
+  Version 1.1.6 fixes saved numeric/date range values being mistaken for entity
+  lists (for example `cannot use slice as Int` at `filter.stash_id_count.value`).
   For diagnosis, check Stash's scene playback, API connectivity and
   the installed FFmpeg encoders.
 - **Limits:** `TVGUIDE_EPG_DAYS` is 1–7 (default 3); `TVGUIDE_MAX_STREAMS` is 1–32

@@ -53,11 +53,14 @@ test('real HTTP exports return matching channel IDs and valid content types', as
     assert.equal((await get('/stream/%xx.ts')).status, 400);
 });
 
-test('saved tag and Stash-ID filters produce working M3U/XMLTV without unsupported input fields', async (t) => {
+test('saved tags, Stash IDs and numeric/date ranges produce working M3U/XMLTV without invalid input fields', async (t) => {
     const requests = [];
     const saved = {
         tags: { modifier: 'INCLUDES_ALL', value: { items: [{ id: '71' }], excluded: [], depth: 0 } },
-        stash_id_endpoint: { modifier: 'NOT_NULL', value: { endpoint: 'https://stashdb.org/graphql', stashID: '' } }
+        stash_id_endpoint: { modifier: 'NOT_NULL', value: { endpoint: 'https://stashdb.org/graphql', stashID: '' } },
+        stash_id_count: { modifier: 'GREATER_THAN', value: { value: 0 } },
+        rating100: { modifier: 'BETWEEN', value: { value: 50, value2: 100 } },
+        date: { modifier: 'GREATER_THAN', value: { value: '2020-01-01' } }
     };
     const gql = createStashClient(config, async (_url, options) => {
         const { query, variables } = JSON.parse(options.body);
@@ -72,9 +75,15 @@ test('saved tag and Stash-ID filters produce working M3U/XMLTV without unsupport
             if ('value' in variables.filter.stash_id_endpoint) return new Response(JSON.stringify({ errors: [{
                 message: 'unknown field', path: ['variable', 'filter', 'stash_id_endpoint', 'value']
             }] }), { status: 400 });
+            if (!Number.isInteger(variables.filter.stash_id_count.value)) return new Response(JSON.stringify({ errors: [{
+                message: 'cannot use slice as Int', path: ['variable', 'filter', 'stash_id_count', 'value']
+            }] }), { status: 400 });
             assert.deepEqual(variables.filter, {
                 tags: { modifier: 'INCLUDES_ALL', value: ['71'] },
-                stash_id_endpoint: { modifier: 'NOT_NULL', endpoint: 'https://stashdb.org/graphql', stash_id: '' }
+                stash_id_endpoint: { modifier: 'NOT_NULL', endpoint: 'https://stashdb.org/graphql', stash_id: '' },
+                stash_id_count: { modifier: 'GREATER_THAN', value: 0 },
+                rating100: { modifier: 'BETWEEN', value: 50, value2: 100 },
+                date: { modifier: 'GREATER_THAN', value: '2020-01-01' }
             });
             requests.push(query);
             data = query.includes('SceneCount') ? { findScenes: { count: 1 } } : { findScenes: { scenes: [scene] } };
