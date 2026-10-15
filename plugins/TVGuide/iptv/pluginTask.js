@@ -5,6 +5,13 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createStashClient, readConfig } from './config.js';
 
+// Stash's native settings form writes unset NUMBER fields as 0. At this UI
+// boundary, zero/blank means the documented default; environment config remains
+// strict, and negative/out-of-range nonzero values still fail validation.
+function optionalNumber(value) {
+    return value == null || (typeof value === 'string' && !value.trim()) || Number(value) === 0 ? undefined : value;
+}
+
 export async function readInput(input = process.stdin) {
     let text = '';
     for await (const chunk of input) {
@@ -32,9 +39,9 @@ export async function pluginConfig(input, { client = createStashClient } = {}) {
         TVGUIDE_PUBLIC_URL: stored.iptv_03_public_url,
         TVGUIDE_TOKEN: stored.iptv_04_token,
         TVGUIDE_HOST: stored.iptv_05_host || '0.0.0.0',
-        TVGUIDE_PORT: stored.iptv_06_port ?? undefined,
-        TVGUIDE_EPG_DAYS: stored.iptv_07_epg_days ?? undefined,
-        TVGUIDE_MAX_STREAMS: stored.iptv_08_max_streams ?? undefined,
+        TVGUIDE_PORT: optionalNumber(stored.iptv_06_port),
+        TVGUIDE_EPG_DAYS: optionalNumber(stored.iptv_07_epg_days),
+        TVGUIDE_MAX_STREAMS: optionalNumber(stored.iptv_08_max_streams),
         FFMPEG_PATH: stored.iptv_10_ffmpeg || data.configuration.general?.ffmpegPath || 'ffmpeg'
     });
     if (!stored.iptv_03_public_url) throw new Error('Set IPTV Public URL in TVGuide plugin settings to the Stash LXC address on port 9898');
