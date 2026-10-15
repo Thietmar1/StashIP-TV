@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { once } = require('node:events');
-const { readConfig, createIptvServer, createMediaProxy, createStashClient } = require('../../tvguide-server.js');
+const { readConfig, createIptvServer, createMediaProxy, createStashClient, loadGuide } = require('../../tvguide-server.js');
 const config = readConfig({ TVGUIDE_TOKEN: 'a'.repeat(32), STASH_URL: 'http://stash:9999', STASH_API_KEY: 'never-export-this', TVGUIDE_MAX_STREAMS: '1' });
 const channel = { id: 'studio:1', source: 'studio', name: 'Studio One', logo: { type: 'image', url: '/studio/1/image' } };
 const scene = { id: '1', title: 'Scheduled show', files: [{ duration: 86400 }] };
@@ -51,6 +51,45 @@ test('real HTTP exports return matching channel IDs and valid content types', as
     assert.equal((await get('/stream/studio%3A2.ts')).status, 404);
     assert.equal((await get('/stream/studio%3A1')).status, 404);
     assert.equal((await get('/stream/%xx.ts')).status, 400);
+});
+
+test('saved tag and Stash-ID filters produce working M3U/XMLTV without unsupported input fields', async (t) => {
+    const requests = [];
+    const saved = {
+        tags: { modifier: 'INCLUDES_ALL', value: { items: [{ id: '71' }], excluded: [], depth: 0 } },
+        stash_id_endpoint: { modifier: 'NOT_NULL', value: { endpoint: 'https://stashdb.org/graphql', stashID: '' } }
+    };
+    const gql = createStashClient(config, async (_url, options) => {
+        const { query, variables } = JSON.parse(options.body);
+        let data;
+        if (query.includes('IPTVConfiguration')) data = { configuration: { plugins: { TVGuide: { tvguide_state: {
+            tvguide_lineup: JSON.stringify([{ source: 'savedFilter', names: ['Tagged channel'] }])
+        } } } } };
+        else if (query.includes('SavedFilters')) data = { findSavedFilters: [{ id: '9', name: 'Tagged channel', object_filter: saved }] };
+        else {
+            // Reproduce Stash's HTTP 400 for the original invalid input. The
+            // regression test must fail as 502 before the conversion is fixed.
+            if ('value' in variables.filter.stash_id_endpoint) return new Response(JSON.stringify({ errors: [{
+                message: 'unknown field', path: ['variable', 'filter', 'stash_id_endpoint', 'value']
+            }] }), { status: 400 });
+            assert.deepEqual(variables.filter, {
+                tags: { modifier: 'INCLUDES_ALL', value: ['71'] },
+                stash_id_endpoint: { modifier: 'NOT_NULL', endpoint: 'https://stashdb.org/graphql', stash_id: '' }
+            });
+            requests.push(query);
+            data = query.includes('SceneCount') ? { findScenes: { count: 1 } } : { findScenes: { scenes: [scene] } };
+        }
+        return new Response(JSON.stringify({ data }));
+    });
+    const { get } = await setup(t, { load: loadGuide, gql });
+    const playlist = await get('/playlist.m3u');
+    assert.equal(playlist.status, 200);
+    assert.match(await playlist.text(), /tvg-id="savedFilter:9"/);
+    const epg = await get('/epg.xml');
+    assert.equal(epg.status, 200);
+    assert.match(await epg.text(), /channel="savedFilter:9"/);
+    assert.ok(requests.some((query) => query.includes('SceneCount')));
+    assert.ok(requests.some((query) => query.includes('ScenePool')));
 });
 
 test('failed snapshots retry; snapshots expire after five minutes and at midnight', async (t) => {
@@ -168,3 +207,4 @@ test('upstream redirects cannot forward the API key to another origin', async (t
     assert.equal((await fetch(proxy.url)).status, 502);
     assert.equal(received, false);
 });
+

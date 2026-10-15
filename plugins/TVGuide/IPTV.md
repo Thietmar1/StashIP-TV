@@ -244,6 +244,9 @@ for the M3U tuner and XMLTV provider screens.
   health returns 200 but the playlist returns 502, request the playlist once and
   inspect `docker exec stash tail -n 30 /root/.stash/tvguide-iptv/server.log`
   for that operation's error (requires version 1.1.4 or newer).
+  Version 1.1.5 also logs GraphQL HTTP 400/422 explanations and their field paths.
+  It fixes saved Stash-ID criteria being sent with an unsupported `value` field,
+  which made playlists fail with `variable.filter.stash_id_endpoint.value`.
   For diagnosis, check Stash's scene playback, API connectivity and
   the installed FFmpeg encoders.
 - **Limits:** `TVGUIDE_EPG_DAYS` is 1–7 (default 3); `TVGUIDE_MAX_STREAMS` is 1–32

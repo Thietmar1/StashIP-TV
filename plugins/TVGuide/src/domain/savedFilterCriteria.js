@@ -12,8 +12,9 @@
  *     { modifier, value: [id], excludes: [id], depth }
  *
  * Forwarding the raw filter fails validation with "cannot use map as ID", so
- * this module does the conversion. Scalar criteria already match and pass
- * through untouched.
+ * this module does the conversion. Stash-ID criteria store their endpoint and
+ * ID inside `value`, while the API expects endpoint/stash_id beside modifier.
+ * API-shaped criteria pass through untouched.
  */
 
 /** Nested boolean groups are themselves SceneFilterTypes. */
@@ -69,8 +70,19 @@ export function savedFilterToSceneFilter(objectFilter) {
             continue;
         }
 
+        if (field === 'stash_id_endpoint' && criterion && Object.prototype.hasOwnProperty.call(criterion, 'value')) {
+            const value = criterion.value;
+            out[field] = {
+                modifier: criterion.modifier,
+                endpoint: typeof value === 'string' ? '' : value?.endpoint ?? '',
+                stash_id: typeof value === 'string' ? value : value?.stashID ?? value?.stash_id ?? ''
+            };
+            continue;
+        }
+
         out[field] = isMultiCriterion(criterion) ? convertCriterion(criterion) : criterion;
     }
 
     return out;
 }
+

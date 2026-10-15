@@ -126,4 +126,46 @@ describe('savedFilterToSceneFilter', () => {
         expect(savedFilterToSceneFilter('nonsense')).toEqual({});
         expect(savedFilterToSceneFilter({})).toEqual({});
     });
+
+    it('converts saved Stash-ID values alongside tags without losing either constraint', () => {
+        const saved = {
+            tags: { modifier: 'INCLUDES_ALL', value: { items: [{ id: '71' }], excluded: [], depth: 0 } },
+            stash_id_endpoint: { modifier: 'EQUALS', value: { endpoint: 'https://stashdb.org/graphql', stashID: 'scene-id' } }
+        };
+        const before = JSON.stringify(saved);
+        expect(savedFilterToSceneFilter(saved)).toEqual({
+            tags: { modifier: 'INCLUDES_ALL', value: ['71'] },
+            stash_id_endpoint: { modifier: 'EQUALS', endpoint: 'https://stashdb.org/graphql', stash_id: 'scene-id' }
+        });
+        expect(JSON.stringify(saved)).toBe(before);
+    });
+
+    it('supports legacy string Stash IDs and endpoint-qualified null checks', () => {
+        expect(savedFilterToSceneFilter({ stash_id_endpoint: { modifier: 'NOT_EQUALS', value: 'old-id' } })).toEqual({
+            stash_id_endpoint: { modifier: 'NOT_EQUALS', endpoint: '', stash_id: 'old-id' }
+        });
+        for (const modifier of ['IS_NULL', 'NOT_NULL']) {
+            const out = savedFilterToSceneFilter({ NOT: { stash_id_endpoint: {
+                modifier, value: { endpoint: 'https://stashdb.org/graphql', stashID: '' }
+            } } });
+            expect(out.NOT.stash_id_endpoint).toEqual({ modifier, endpoint: 'https://stashdb.org/graphql', stash_id: '' });
+        }
+    });
+
+    it('supports snake-case nested IDs and empty saved values without adding an API value field', () => {
+        expect(savedFilterToSceneFilter({ stash_id_endpoint: { modifier: 'EQUALS', value: { stash_id: 'scene-id' } } })).toEqual({
+            stash_id_endpoint: { modifier: 'EQUALS', endpoint: '', stash_id: 'scene-id' }
+        });
+        for (const value of [null, undefined, {}]) {
+            const out = savedFilterToSceneFilter({ stash_id_endpoint: { modifier: 'IS_NULL', value } });
+            expect(out.stash_id_endpoint).toEqual({ modifier: 'IS_NULL', endpoint: '', stash_id: '' });
+        }
+    });
+
+    it('preserves API-shaped Stash-ID criteria and null criteria', () => {
+        const criterion = { modifier: 'EQUALS', endpoint: 'https://stashdb.org/graphql', stash_id: 'scene-id' };
+        expect(savedFilterToSceneFilter({ stash_id_endpoint: criterion }).stash_id_endpoint).toBe(criterion);
+        expect(savedFilterToSceneFilter({ stash_id_endpoint: null }).stash_id_endpoint).toBeNull();
+    });
 });
+
