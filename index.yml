@@ -2,7 +2,7 @@
   name: TV Guide
   metadata:
     description: Stash TVGuide with M3U, XMLTV and live streaming for Jellyfin.
-  version: "1.1-4d9c8a8d479f"
-  date: "2026-10-15 17:13:43"
+  version: "1.1-e7eddcdafc7e"
+  date: "2026-10-15 17:20:16"
   path: TVGuide.zip
-  sha256: 59330c909b9cc322a6628e6ba4cc4e4643929abbf74cd5c7b430ba7dcfe6d5c5
+  sha256: 6f613b7a90ade4336be8f2d656c144001b79dcac459cdedfe5ee26cba331ad67
