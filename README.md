@@ -1,45 +1,15 @@
-# Thietmar1 Stash plugins
+# TVGuide Stash install source
 
-Fork of [hippochapel/hippo-stash-plugins](https://github.com/hippochapel/hippo-stash-plugins),
-with TVGuide M3U playlists, XMLTV listings and live streams for Jellyfin.
+Add this URL in Stash > Settings > Plugins > Available Plugins > Add Source:
 
-## Install TVGuide in Stash
-
-In **Settings → Plugins → Available Plugins → Add Source**, add:
-
-```text
 https://raw.githubusercontent.com/Thietmar1/hippo-stash-plugins/tvguide-iptv/index.yml
-```
 
-Refresh the source and install **TV Guide**. The package includes the guide and
-IPTV server. Install Node.js 20+ and FFmpeg in the Stash LXC (`apt install nodejs
-ffmpeg`), configure the IPTV fields in TVGuide's plugin settings, then run
-**Start IPTV Server** in Stash's Tasks page. No npm install or separate systemd
-service is needed for plugin-managed operation.
+Install TV Guide 1.1. Requires Node.js 20+ and FFmpeg in the Stash LXC. Configure IPTV Public URL, IPTV Access Token, IPTV Stash API Key and IPTV Timezone in the plugin settings, then run Start IPTV Server from Stash's Tasks page.
 
-See [IPTV setup](plugins/TVGuide/IPTV.md) for the settings and Jellyfin URLs.
-Stop the IPTV server before a plugin update, then start it again afterwards.
-The `tvguide-iptv` branch contains the compiled package and its SHA256-verified
-index. The publish workflow updates that branch when changes land on `main`.
-This install source works without GitHub Pages.
+Source and installation guide: https://github.com/Thietmar1/hippo-stash-plugins/blob/codex/tvguide-jellyfin-iptv/plugins/TVGuide/IPTV.md
 
-## Optional GitHub Pages source for the full plugin collection
+Source review: https://github.com/Thietmar1/hippo-stash-plugins/pull/1
 
-1. Click **Use this template** > **Create a new repository**. 
-1. Choose a repository name and click **Create repository**.
-1. Open **Settings** and head to **Pages**.
-1. Under Build and deployment select the Source as GitHub Actions.
+Source revision: 4d9c8a8d479f96e9f083372353ba091f91d24279
 
-Now add your plugins to [plugins](/plugins) directory and they will be automatically published to the source index.
-
-After enabling Pages, the full collection's source URL is
-[`https://thietmar1.github.io/hippo-stash-plugins/main/index.yml`](https://thietmar1.github.io/hippo-stash-plugins/main/index.yml).
-
-## Share your plugins
-
-- [Create a new topic](https://discourse.stashapp.cc/t/-/33) for your plugin on the community forum.
-- [Add your source index to the list](https://discourse.stashapp.cc/t/-/122) on the Stash community forum.
-
-## License
-
-The default license is set to [AGPL-3.0](/LICENCE). Before publishing any plugins you can change it.
+License: AGPL-3.0 (included inside TVGuide.zip).
