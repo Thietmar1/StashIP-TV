@@ -236,7 +236,11 @@ for the M3U tuner and XMLTV provider screens.
   that viewing connection. Jellyfin can reconnect; the next connection starts at
   the current live offset. Failed requests return 502; excess viewers return 503.
   Logs deliberately omit upstream URLs and FFmpeg stderr because those can contain
-  credentials. For diagnosis, check Stash's scene playback, API connectivity and
+  credentials. From 1.1.3, API errors include the GraphQL operation and error in
+  the server log, with configured keys, tokens, cookies and URLs redacted. If
+  health returns 200 but the playlist returns 502, request the playlist once and
+  inspect `docker logs --since 2m --tail 60 stash` for that operation's error.
+  For diagnosis, check Stash's scene playback, API connectivity and
   the installed FFmpeg encoders.
 - **Limits:** `TVGUIDE_EPG_DAYS` is 1–7 (default 3); `TVGUIDE_MAX_STREAMS` is 1–32
   (default 2). Each channel has a 100,000-programme limit per EPG export, reported
