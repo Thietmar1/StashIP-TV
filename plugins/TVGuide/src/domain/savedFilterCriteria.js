@@ -19,6 +19,14 @@
 
 /** Nested boolean groups are themselves SceneFilterTypes. */
 const NESTED_FIELDS = ['AND', 'OR', 'NOT'];
+// Scalar range inputs in SceneFilterType. Stash's UI wraps their bounds in
+// value: { value, value2 }; these objects are not entity selections.
+const NUMBER_FIELDS = new Set([
+    'id', 'file_count', 'rating100', 'o_counter', 'framerate', 'bitrate',
+    'duration', 'tag_count', 'performer_age', 'performer_count', 'stash_id_count',
+    'interactive_speed', 'resume_time', 'play_count', 'play_duration'
+]);
+const DATE_FIELDS = new Set(['date', 'created_at', 'updated_at', 'last_played_at']);
 
 const idsOf = (list) =>
     (Array.isArray(list) ? list : [])
@@ -26,14 +34,15 @@ const idsOf = (list) =>
         .filter((id) => id != null)
         .map(String);
 
-/** A UI multi-criterion is recognisable by its object-shaped `value`. */
+/** Only selection-shaped values are multi-criteria, not every object value. */
 function isMultiCriterion(criterion) {
     return (
         criterion &&
         typeof criterion === 'object' &&
         criterion.value &&
         typeof criterion.value === 'object' &&
-        !Array.isArray(criterion.value)
+        !Array.isArray(criterion.value) &&
+        ('items' in criterion.value || 'excluded' in criterion.value || 'depth' in criterion.value)
     );
 }
 
@@ -77,6 +86,17 @@ export function savedFilterToSceneFilter(objectFilter) {
                 endpoint: typeof value === 'string' ? '' : value?.endpoint ?? '',
                 stash_id: typeof value === 'string' ? value : value?.stashID ?? value?.stash_id ?? ''
             };
+            continue;
+        }
+
+        if ((NUMBER_FIELDS.has(field) || DATE_FIELDS.has(field)) && criterion?.value &&
+            typeof criterion.value === 'object' && !Array.isArray(criterion.value)) {
+            const { value, value2 } = criterion.value;
+            out[field] = {
+                modifier: criterion.modifier,
+                value: value ?? (NUMBER_FIELDS.has(field) ? 0 : '')
+            };
+            if (value2 !== undefined) out[field].value2 = value2;
             continue;
         }
 

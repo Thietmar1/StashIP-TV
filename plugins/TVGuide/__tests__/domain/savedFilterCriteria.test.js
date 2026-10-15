@@ -167,5 +167,49 @@ describe('savedFilterToSceneFilter', () => {
         expect(savedFilterToSceneFilter({ stash_id_endpoint: criterion }).stash_id_endpoint).toBe(criterion);
         expect(savedFilterToSceneFilter({ stash_id_endpoint: null }).stash_id_endpoint).toBeNull();
     });
+
+    it('converts saved numeric bounds to scalar API values and preserves zero', () => {
+        for (const field of ['id', 'file_count', 'rating100', 'o_counter', 'framerate', 'bitrate',
+            'duration', 'tag_count', 'performer_age', 'performer_count', 'stash_id_count',
+            'interactive_speed', 'resume_time', 'play_count', 'play_duration']) {
+            const saved = { [field]: { modifier: 'BETWEEN', value: { value: 0, value2: 5 } } };
+            const before = JSON.stringify(saved);
+            expect(savedFilterToSceneFilter(saved)[field]).toEqual({ modifier: 'BETWEEN', value: 0, value2: 5 });
+            expect(JSON.stringify(saved)).toBe(before);
+        }
+    });
+
+    it('converts saved date/timestamp bounds and nested numeric criteria', () => {
+        for (const field of ['date', 'created_at', 'updated_at', 'last_played_at']) {
+            expect(savedFilterToSceneFilter({ [field]: { modifier: 'BETWEEN', value: {
+                value: '2026-01-01', value2: '2026-02-01'
+            } } })[field]).toEqual({ modifier: 'BETWEEN', value: '2026-01-01', value2: '2026-02-01' });
+        }
+        expect(savedFilterToSceneFilter({ NOT: { stash_id_count: { modifier: 'GREATER_THAN', value: { value: 1 } } } }))
+            .toEqual({ NOT: { stash_id_count: { modifier: 'GREATER_THAN', value: 1 } } });
+    });
+
+    it('uses Stash UI scalar defaults for empty/null range bounds and retains an explicit null upper bound', () => {
+        for (const value of [{}, { value: null }, { value: undefined }]) {
+            expect(savedFilterToSceneFilter({ stash_id_count: { modifier: 'IS_NULL', value } }).stash_id_count)
+                .toEqual({ modifier: 'IS_NULL', value: 0 });
+            expect(savedFilterToSceneFilter({ date: { modifier: 'IS_NULL', value } }).date)
+                .toEqual({ modifier: 'IS_NULL', value: '' });
+        }
+        expect(savedFilterToSceneFilter({ rating100: { modifier: 'GREATER_THAN', value: { value: 50, value2: null } } }).rating100)
+            .toEqual({ modifier: 'GREATER_THAN', value: 50, value2: null });
+    });
+
+    it('does not rewrite invalid scalar/unknown objects into empty lists', () => {
+        for (const criterion of [null, {}, { value: null }, { value: ['invalid'] }]) {
+            expect(savedFilterToSceneFilter({ stash_id_count: criterion }).stash_id_count).toBe(criterion);
+        }
+        const unknown = { modifier: 'EQUALS', value: { custom: 'unsupported' } };
+        expect(savedFilterToSceneFilter({ unknown }).unknown).toBe(unknown);
+        for (const value of [{ excluded: [] }, { items: [] }, { depth: 0 }]) {
+            expect(savedFilterToSceneFilter({ tags: { modifier: 'IS_NULL', value } }).tags)
+                .toEqual({ modifier: 'IS_NULL', value: [] });
+        }
+    });
 });
 
