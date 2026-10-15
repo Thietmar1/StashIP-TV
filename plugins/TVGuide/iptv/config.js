@@ -50,17 +50,37 @@ export function stashMediaUrl(config, value) {
     return url.href;
 }
 
+export class StashRequestError extends Error {}
+
+/** Only explicitly sanitized API errors are eligible for detailed server logs. */
+function apiMessage(config, text) {
+    let message = String(text);
+    const cookieValue = config.sessionCookie?.slice(config.sessionCookie.indexOf('=') + 1);
+    for (const secret of [config.apiKey, config.sessionCookie, cookieValue, config.token]) {
+        if (secret) message = message.split(secret).join('[redacted]');
+    }
+    return message.replace(/https?:\/\/[^\s<>"']+/gi, '[URL redacted]').slice(0, 1000);
+}
+
 export function createStashClient(config, fetchFn = fetch) {
     return async (query, variables) => {
-        const response = await fetchFn(`${config.stashUrl}/graphql`, {
+        const operation = /(?:query|mutation)\s+(\w+)/.exec(query)?.[1] || 'GraphQL';
+        const fail = (message) => new StashRequestError(`${operation}: ${apiMessage(config, message)}`);
+        let response;
+        try { response = await fetchFn(`${config.stashUrl}/graphql`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...stashHeaders(config) },
             body: JSON.stringify({ query, variables }),
+            redirect: 'error',
             signal: AbortSignal.timeout(30000)
-        });
-        if (!response.ok) throw new Error(`Stash GraphQL HTTP ${response.status}`);
-        const body = await response.json();
-        if (body.errors?.length || !body.data) throw new Error('Stash rejected the TVGuide GraphQL request');
+        }); } catch { throw fail('Stash network request failed or timed out'); }
+        if (!response.ok) throw fail(`Stash GraphQL HTTP ${response.status}`);
+        let body;
+        try { body = await response.json(); } catch { throw fail('Stash returned invalid JSON'); }
+        if (Array.isArray(body.errors) && body.errors.length) {
+            throw fail(`Stash rejected the TVGuide GraphQL request: ${body.errors.map((error) => error.message || 'Unknown GraphQL error').join('; ')}`);
+        }
+        if (!body.data) throw fail('Stash rejected the TVGuide GraphQL request: no data returned');
         return body.data;
     };
 }

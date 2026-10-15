@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
-import { createStashClient, stashMediaUrl, stashHeaders, endpoint } from './config.js';
+import { createStashClient, stashMediaUrl, stashHeaders, endpoint, StashRequestError } from './config.js';
 import { loadGuide, renderM3u, renderXmltv, playableChannels, nextMidnight } from './guide.js';
 import { dayBucket } from '../src/domain/schedule.js';
 import { streamChannel } from './stream.js';
@@ -106,8 +106,10 @@ export function createIptvServer(config, { gql = createStashClient(config), load
             finally { active--; }
             if (!response.destroyed) response.end();
         } catch (error) {
-            // Errors from fetch/FFmpeg may include credentials. Keep logs generic.
-            log('TVGuide IPTV: request failed; check Stash connectivity, media URLs and FFmpeg.');
+            // Keep arbitrary/FFmpeg errors generic, but give admins the operation
+            // and validated, credential-redacted GraphQL error for API failures.
+            log(error instanceof StashRequestError ? `TVGuide IPTV: ${error.message}`
+                : 'TVGuide IPTV: request failed; check Stash connectivity, media URLs and FFmpeg.');
             if (response.headersSent) response.destroy();
             else reply(error instanceof URIError ? 400 : 502, 'TVGuide upstream unavailable\n');
         }

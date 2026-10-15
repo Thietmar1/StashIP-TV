@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { once } = require('node:events');
-const { readConfig, createIptvServer, createMediaProxy } = require('../../tvguide-server.js');
+const { readConfig, createIptvServer, createMediaProxy, createStashClient } = require('../../tvguide-server.js');
 const config = readConfig({ TVGUIDE_TOKEN: 'a'.repeat(32), STASH_URL: 'http://stash:9999', STASH_API_KEY: 'never-export-this', TVGUIDE_MAX_STREAMS: '1' });
 const channel = { id: 'studio:1', source: 'studio', name: 'Studio One', logo: { type: 'image', url: '/studio/1/image' } };
 const scene = { id: '1', title: 'Scheduled show', files: [{ duration: 86400 }] };
@@ -117,6 +117,22 @@ test('upstream failures never expose error details or credentials in HTTP respon
     assert.equal(await result.text(), 'TVGuide upstream unavailable\n');
     assert.equal(logs.length, 1);
     assert.ok(!logs[0].includes('private-secret-url'));
+});
+
+test('GraphQL failures identify the operation and cause in logs while redacting secrets and URLs', async (t) => {
+    const logs = [];
+    const gql = createStashClient({ ...config, sessionCookie: 'session=private-cookie' }, async () => ({
+        ok: true, json: async () => ({ errors: [{ message: `Unknown field invalidCriterion; ${config.apiKey}; ${config.token}; private-cookie; http://stash:9999/graphql?secret=other` }] })
+    }));
+    const { get } = await setup(t, { load: async () => {
+        await gql('query TVGuideScenePool { invalidCriterion }');
+    }, log: (line) => logs.push(line) });
+    const result = await get('/playlist.m3u');
+    assert.equal(result.status, 502);
+    assert.equal(await result.text(), 'TVGuide upstream unavailable\n');
+    assert.match(logs[0], /TVGuideScenePool/);
+    assert.match(logs[0], /Unknown field invalidCriterion/);
+    for (const secret of [config.apiKey, config.token, 'private-cookie', 'secret=other']) assert.ok(!logs[0].includes(secret));
 });
 
 test('private media proxy forwards byte ranges and rejects requests outside its random path', async (t) => {
