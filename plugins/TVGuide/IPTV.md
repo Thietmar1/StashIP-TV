@@ -54,9 +54,9 @@ Open TVGuide's plugin settings and set:
 | IPTV Stash API Key | Your Stash API key, recommended for uninterrupted service |
 | IPTV Timezone | `Europe/Berlin`, matching the browser guide |
 | IPTV Listen Address | Leave empty for `0.0.0.0` (LAN access) |
-| IPTV Port | Leave empty for `9898`; match the Public URL |
-| IPTV Guide Days | Leave empty for `3` |
-| IPTV Maximum Streams | Leave empty for `2` |
+| IPTV Port | `9898`; match the Public URL (zero/empty also uses 9898 in 1.1.2+) |
+| IPTV Guide Days | `3` (zero/empty also uses 3 in 1.1.2+) |
+| IPTV Maximum Streams | `2` (zero/empty also uses 2 in 1.1.2+) |
 
 Leave **IPTV Stash URL** empty to use Stash's local task connection. If Stash returns
 media URLs using an external origin, set this field to that same reachable origin.
@@ -86,6 +86,29 @@ Allow TCP 9898 from the Jellyfin LXC to the Stash LXC, then follow **Jellyfin
 configuration** below. The M3U URL is
 `http://STASH_LXC_IP:9898/playlist.m3u?token=YOUR_TVGUIDE_TOKEN`; XMLTV uses
 `http://STASH_LXC_IP:9898/epg.xml?token=YOUR_TVGUIDE_TOKEN`.
+
+## Stash in Docker inside the LXC
+
+If Stash runs as a Docker container, install Node in that container/image, not
+only in Debian on the LXC host. The official Stash image uses Alpine and already
+includes FFmpeg. For a quick check/install on the container named `stash`:
+
+```sh
+docker exec -u 0 stash apk add --no-cache nodejs
+docker exec stash /usr/bin/node --version
+```
+
+Make the installation part of your Dockerfile or existing startup script so it
+survives container replacement. In Compose, publish `9898:9898` alongside Stash's
+`9999:9999`. Set IPTV Listen Address to `0.0.0.0` and IPTV Public URL to the LXC's
+LAN address on port 9898, for example `http://192.168.1.50:9898`. Do not use a
+Docker-internal address or localhost for the public URL consumed by Jellyfin.
+IPTV Stash URL can stay empty; it uses local port 9999 inside the Stash container.
+
+For TVGuide versions before 1.1.2, enter explicit positive numbers for IPTV Port,
+Guide Days and Maximum Streams. Stash can save blank NUMBER settings as zero,
+which those versions reject. Version 1.1.2 treats zero/blank as the documented
+defaults at the plugin-settings boundary. Restart IPTV Server after saving.
 
 ## Alternative: standalone systemd service
 
