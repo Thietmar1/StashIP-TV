@@ -236,7 +236,7 @@ for the M3U tuner and XMLTV provider screens.
   that viewing connection. Jellyfin can reconnect; the next connection starts at
   the current live offset. Failed requests return 502; excess viewers return 503.
   Logs deliberately omit upstream URLs and FFmpeg stderr because those can contain
-  credentials. From 1.1.2, API errors include the GraphQL operation and error in
+  credentials. From 1.1.3, API errors include the GraphQL operation and error in
   the server log, with configured keys, tokens, cookies and URLs redacted. If
   health returns 200 but the playlist returns 502, request the playlist once and
   inspect `docker logs --since 2m --tail 60 stash` for that operation's error.
