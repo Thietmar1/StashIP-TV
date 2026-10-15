@@ -3,6 +3,7 @@
 node_modules/
 coverage/
 /.verification/
+/dist/
 
 # Build output -- generated from plugins/TVGuide/src by esbuild
 plugins/TVGuide/tvguide.js

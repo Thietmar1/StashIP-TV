@@ -20,6 +20,7 @@ export function readConfig(env = process.env) {
     return {
         stashUrl: httpUrl(env.STASH_URL || 'http://127.0.0.1:9999', 'STASH_URL'),
         apiKey: env.STASH_API_KEY || '',
+        sessionCookie: env.STASH_SESSION_COOKIE || '',
         publicUrl: httpUrl(env.TVGUIDE_PUBLIC_URL || 'http://127.0.0.1:9898', 'TVGUIDE_PUBLIC_URL'),
         host: env.TVGUIDE_HOST || '127.0.0.1',
         port: integer(env.TVGUIDE_PORT, 9898, 1, 65535, 'TVGUIDE_PORT'),
@@ -28,6 +29,10 @@ export function readConfig(env = process.env) {
         ffmpeg: env.FFMPEG_PATH || 'ffmpeg',
         token
     };
+}
+
+export function stashHeaders(config) {
+    return config.apiKey ? { ApiKey: config.apiKey } : config.sessionCookie ? { Cookie: config.sessionCookie } : {};
 }
 
 export function endpoint(config, path) {
@@ -49,7 +54,7 @@ export function createStashClient(config, fetchFn = fetch) {
     return async (query, variables) => {
         const response = await fetchFn(`${config.stashUrl}/graphql`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...(config.apiKey ? { ApiKey: config.apiKey } : {}) },
+            headers: { 'Content-Type': 'application/json', ...stashHeaders(config) },
             body: JSON.stringify({ query, variables }),
             signal: AbortSignal.timeout(30000)
         });

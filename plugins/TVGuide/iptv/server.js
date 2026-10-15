@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
-import { createStashClient, stashMediaUrl } from './config.js';
+import { createStashClient, stashMediaUrl, stashHeaders, endpoint } from './config.js';
 import { loadGuide, renderM3u, renderXmltv, playableChannels, nextMidnight } from './guide.js';
 import { dayBucket } from '../src/domain/schedule.js';
 import { streamChannel } from './stream.js';
@@ -37,6 +37,23 @@ export function createIptvServer(config, { gql = createStashClient(config), load
         };
         try {
             const url = new URL(request.url, 'http://tvguide.invalid');
+            // Separate private control credential: the Jellyfin token cannot
+            // stop the daemon. No process is ever killed by a stale PID file.
+            if (config.controlToken && ['/control/status', '/control/stop'].includes(url.pathname)) {
+                const supplied = Buffer.from(request.headers['x-tvguide-control'] || '');
+                const expected = Buffer.from(config.controlToken);
+                if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return reply(401, 'Unauthorized\n');
+                if (url.pathname.endsWith('/status') && request.method === 'GET') return reply(200, JSON.stringify({
+                    instanceId: config.instanceId, pid: process.pid,
+                    playlist: endpoint(config, '/playlist.m3u'), epg: endpoint(config, '/epg.xml')
+                }), 'application/json');
+                if (url.pathname.endsWith('/stop') && request.method === 'POST') {
+                    reply(200, JSON.stringify({ instanceId: config.instanceId }), 'application/json');
+                    setImmediate(() => { server.close(); server.closeAllConnections(); });
+                    return;
+                }
+                return reply(405, 'Method not allowed\n');
+            }
             if (!authorized(request, url, config.token)) return reply(401, 'Unauthorized\n');
             if (!['GET', 'HEAD'].includes(request.method)) return reply(405, 'GET or HEAD required\n');
             if (prefix && !url.pathname.startsWith(`${prefix}/`)) return reply(404, 'Not found\n');
@@ -66,7 +83,7 @@ export function createIptvServer(config, { gql = createStashClient(config), load
             if (!isStream) {
                 if (channel.logo?.type !== 'image') return reply(404, 'No logo\n');
                 const upstream = await fetchFn(stashMediaUrl(config, channel.logo.url), {
-                    headers: config.apiKey ? { ApiKey: config.apiKey } : {},
+                    headers: stashHeaders(config),
                     signal: AbortSignal.timeout(15000), redirect: 'error'
                 });
                 const type = upstream.headers.get('content-type') || '';

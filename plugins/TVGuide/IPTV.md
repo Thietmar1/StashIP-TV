@@ -1,6 +1,6 @@
 # TVGuide in Jellyfin (M3U + XMLTV)
 
-The optional TVGuide IPTV companion exposes the Stash guide as live channels:
+TVGuide's included IPTV server exposes the Stash guide as live channels:
 
 - `/playlist.m3u`: one permanent stream URL per channel, with matching `tvg-id`.
 - `/epg.xml`: XMLTV programme listings for today and the following days.
@@ -8,8 +8,9 @@ The optional TVGuide IPTV companion exposes the Stash guide as live channels:
   programme currently on air at its live offset, then advances to the next one.
 - `/health`: process health (also requires the TVGuide token).
 
-This is an additional service, because the existing Stash plugin runs in the
-browser. A downloaded list of scene URLs would start each video at its beginning
+Stash starts the included server through plugin tasks, using its raw external
+plugin interface. It runs in the background so the task queue remains available.
+A downloaded list of scene URLs alone would start each video at its beginning
 and stop at the end; it would not behave as a live channel in Jellyfin.
 
 The companion shares TVGuide's actual JavaScript scheduler, providers, daily pool
@@ -19,9 +20,78 @@ selection in its channel manager first. Renames, logos, pins, hidden channels an
 per-channel scene caps are respected. Search and collapsed groups do not remove
 channels from the exports. Channels with no playable duration are omitted.
 
-## Debian 13 / Proxmox LXC
+## Install and control directly in Stash (Debian 13 / Proxmox LXC)
 
-Run the companion in the **Stash LXC**. Jellyfin can stay in a separate LXC; it only
+In the Stash LXC, install the two runtime requirements once:
+
+```sh
+apt update
+apt install nodejs ffmpeg openssl
+node --version
+openssl rand -hex 24
+```
+
+Node.js must be version 20 or newer. Copy the generated random token for the
+**IPTV Access Token** setting below. The package already contains the built server;
+no npm dependencies, separate checkout or systemd service are needed.
+
+Add this plugin source in **Settings → Plugins → Available Plugins → Add Source**:
+
+```text
+https://raw.githubusercontent.com/Thietmar1/hippo-stash-plugins/tvguide-iptv/index.yml
+```
+
+Refresh the source and install **TV Guide** (version 1.1 or newer). Existing
+TVGuide installations keep the same plugin ID and saved channel lineup. Use this
+fork's source for TVGuide updates, to avoid replacing it with the upstream version.
+
+Open TVGuide's plugin settings and set:
+
+| Setting | Value for your two-LXC setup |
+| --- | --- |
+| IPTV Public URL | `http://STASH_LXC_IP:9898` (reachable from Jellyfin) |
+| IPTV Access Token | The random token generated above; separate from the Stash key |
+| IPTV Stash API Key | Your Stash API key, recommended for uninterrupted service |
+| IPTV Timezone | `Europe/Berlin`, matching the browser guide |
+| IPTV Listen Address | Leave empty for `0.0.0.0` (LAN access) |
+| IPTV Port | Leave empty for `9898`; match the Public URL |
+| IPTV Guide Days | Leave empty for `3` |
+| IPTV Maximum Streams | Leave empty for `2` |
+
+Leave **IPTV Stash URL** empty to use Stash's local task connection. If Stash returns
+media URLs using an external origin, set this field to that same reachable origin.
+Leave **IPTV FFmpeg Path** empty to use Stash's configured FFmpeg binary or PATH.
+Stash settings of type STRING display the API key/token as text; keep them private.
+
+In Stash **Tasks → Plugin Tasks**, run **TV Guide: Start IPTV Server**. The task
+finishes after the background server is ready. **IPTV Server Status** checks it;
+**Restart IPTV Server** applies changed settings, and **Stop IPTV Server** stops
+the server and its viewers. Check Status and run Start again after restarting
+Stash or the LXC. Stop the server
+before updating/uninstalling the plugin and start it after the update. Do not run
+the plugin-managed server and the optional systemd service on the same port.
+
+Tasks use Stash's task session to read configuration; a configured API key is used
+for long-running playback. If no API key is set, the session cookie remains only
+in server memory and playback stops working when that session expires. Restart
+the task to renew the session, or configure the API key.
+
+Private instance-control state is stored in `tvguide-iptv/server.json` underneath
+Stash's configuration directory, outside the installed plugin package. It contains
+no Stash API key or session cookie. A separate control token and instance ID allow
+safe stop/status requests; the Jellyfin access token cannot stop the server.
+The task's structured debug output includes the complete Jellyfin URLs.
+
+Allow TCP 9898 from the Jellyfin LXC to the Stash LXC, then follow **Jellyfin
+configuration** below. The M3U URL is
+`http://STASH_LXC_IP:9898/playlist.m3u?token=YOUR_TVGUIDE_TOKEN`; XMLTV uses
+`http://STASH_LXC_IP:9898/epg.xml?token=YOUR_TVGUIDE_TOKEN`.
+
+## Alternative: standalone systemd service
+
+For automatic startup at LXC boot, you can alternatively manage the server with
+systemd. The plugin tasks above are the default installation path.
+Run the server in the **Stash LXC**. Jellyfin can stay in a separate LXC; it only
 needs network access to TCP port 9898 on the Stash LXC. All transcoding happens in
 the companion using software H.264/AAC, at 720p/25 fps. No device passthrough is
 required. Each viewer consumes one FFmpeg process, so allocate CPU accordingly.

@@ -299,8 +299,9 @@ Subtleties worth knowing before changing this:
 
 ## Jellyfin / IPTV
 
-TVGuide includes an optional standalone companion for M3U channel playlists,
+TVGuide includes a plugin-managed server for M3U channel playlists,
 XMLTV listings and continuous live MPEG-TS streams. It shares the guide's
 scheduler and saved channel selection. See [IPTV.md](IPTV.md) for setup on
-Debian/Proxmox LXC and Jellyfin. The companion requires Node.js 20+ and FFmpeg;
+Debian/Proxmox LXC and Jellyfin. Configure its IPTV plugin settings and use
+Stash's Start/Stop/Restart/Status IPTV tasks. The server requires Node.js 20+ and FFmpeg;
 the browser plugin works independently as before.

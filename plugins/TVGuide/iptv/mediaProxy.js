@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { Readable } from 'node:stream';
+import { stashHeaders } from './config.js';
 
 /** FFmpeg follows HTTP redirects, including custom headers. Keep Stash's API
  * key in Node and relay range requests through a private loopback endpoint. */
@@ -18,7 +19,7 @@ export async function createMediaProxy(config, upstreamUrl, fetchFn = fetch) {
         try {
             const upstream = await fetchFn(upstreamUrl, {
                 method: request.method,
-                headers: { ...(config.apiKey ? { ApiKey: config.apiKey } : {}), ...(request.headers.range ? { Range: request.headers.range } : {}) },
+                headers: { ...stashHeaders(config), ...(request.headers.range ? { Range: request.headers.range } : {}) },
                 redirect: 'error',
                 signal: controller.signal
             });
