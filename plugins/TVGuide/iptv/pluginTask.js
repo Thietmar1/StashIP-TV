@@ -112,10 +112,17 @@ export async function runPluginTask(input, { script = process.argv[1], configure
         // Only the private control credential is persisted. Stash credentials
         // and the Jellyfin access token stay in child memory/stdin.
         await writeFile(file, JSON.stringify(state), { mode: 0o600, flag: 'wx' });
-        const child = spawnFn(process.execPath, [script, '--plugin-server'], {
-            detached: true, windowsHide: true, stdio: ['pipe', 'ignore', 'ignore'],
-            env: { ...process.env, TZ: config.timezone }
-        });
+        // Stash closes the raw task's pipes when the task finishes. Give the
+        // detached daemon its own private stderr file instead of discarding
+        // diagnostics or keeping those pipes open. Each start resets the log.
+        const logFile = await open(join(dir, 'server.log'), 'w', 0o600);
+        let child;
+        try {
+            child = spawnFn(process.execPath, [script, '--plugin-server'], {
+                detached: true, windowsHide: true, stdio: ['pipe', 'ignore', logFile.fd],
+                env: { ...process.env, TZ: config.timezone }
+            });
+        } finally { await logFile.close(); }
         let failed = false;
         child.once('error', () => { failed = true; });
         child.once('exit', () => { failed = true; });
@@ -137,3 +144,4 @@ export async function runPluginTask(input, { script = process.argv[1], configure
         await unlink(lockFile).catch(() => {});
     }
 }
+

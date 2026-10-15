@@ -236,10 +236,14 @@ for the M3U tuner and XMLTV provider screens.
   that viewing connection. Jellyfin can reconnect; the next connection starts at
   the current live offset. Failed requests return 502; excess viewers return 503.
   Logs deliberately omit upstream URLs and FFmpeg stderr because those can contain
-  credentials. From 1.1.3, API errors include the GraphQL operation and error in
-  the server log, with configured keys, tokens, cookies and URLs redacted. If
+  credentials. API errors include the GraphQL operation and error in
+  the server log, with configured keys, tokens, cookies and URLs redacted. Plugin
+  tasks write the detached server's errors to `tvguide-iptv/server.log` inside
+  Stash's configuration directory, resetting that file on each server start.
+  These background errors are not included in `docker logs`. If
   health returns 200 but the playlist returns 502, request the playlist once and
-  inspect `docker logs --since 2m --tail 60 stash` for that operation's error.
+  inspect `docker exec stash tail -n 30 /root/.stash/tvguide-iptv/server.log`
+  for that operation's error (requires version 1.1.4 or newer).
   For diagnosis, check Stash's scene playback, API connectivity and
   the installed FFmpeg encoders.
 - **Limits:** `TVGUIDE_EPG_DAYS` is 1–7 (default 3); `TVGUIDE_MAX_STREAMS` is 1–32
@@ -267,3 +271,4 @@ or newer and reload plugins before running Start IPTV Server again. Installing
 Node through a user's nvm shell does not make it available to Stash's service.
 For another OS or a custom Node location, change the manifest's first `exec` entry
 to the absolute path of that Node executable; standalone operation is unchanged.
+

@@ -86,11 +86,18 @@ test('real detached Stash plugin tasks start, report, restart and stop the packa
     const config = { ...settings, iptv_02_api_key: 'secret-api-key', iptv_05_host: '127.0.0.1', iptv_06_port: port,
         iptv_03_public_url: `http://127.0.0.1:${port}`, tvguide_state: { tvguide_lineup: JSON.stringify([{ source: 'studio', ids: ['1'] }]) } };
     const seen = [];
+    let failPool = false;
     const stash = createServer(async (req, res) => {
         let raw = '';
         for await (const part of req) raw += part;
         seen.push(req.headers);
         const { query } = JSON.parse(raw);
+        if (failPool && query.includes('SceneCount')) {
+            res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ errors: [{
+                message: `Invalid scene criterion; secret-api-key; ${token}; task-session`
+            }] }));
+            return;
+        }
         const data = query.includes('Configuration') ? { configuration: { plugins: { TVGuide: config }, general: {} } }
             : query.includes('Studios') ? { findStudios: { studios: [{ id: '1', name: 'Test Channel', scene_count: 1 }] } }
             : query.includes('SceneCount') ? { findScenes: { count: 1 } }
@@ -122,6 +129,20 @@ test('real detached Stash plugin tasks start, report, restart and stop the packa
     const next = await task('restart');
     assert.equal(next.running, true);
     assert.notEqual(next.pid, first.pid);
+    failPool = true;
+    assert.equal((await fetch(next.playlist)).status, 502);
+    const logPath = join(root, 'tvguide-iptv/server.log');
+    let diagnostics = '';
+    for (let i = 0; i < 50; i++) {
+        diagnostics = await readFile(logPath, 'utf8');
+        if (diagnostics.includes('Invalid scene criterion')) break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.match(diagnostics, /TVGuideSceneCount.*Invalid scene criterion/);
+    for (const secret of ['secret-api-key', 'task-session', token]) assert.ok(!diagnostics.includes(secret));
+    failPool = false;
+    await task('restart');
+    assert.equal(await readFile(logPath, 'utf8'), '');
     assert.ok(seen.some((headers) => headers.cookie === 'session=task-session'));
     assert.ok(seen.some((headers) => headers.apikey === 'secret-api-key'));
     assert.equal((await task('stop')).running, false);
@@ -153,3 +174,4 @@ test('invalid task arguments, unavailable FFmpeg and concurrent tasks fail witho
     await writeFile(join(root, 'tvguide-iptv/task.lock'), 'busy');
     await assert.rejects(runPluginTask(input), /Another/);
 });
+
