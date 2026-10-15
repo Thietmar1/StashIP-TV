@@ -93,7 +93,7 @@ test('real detached Stash plugin tasks start, report, restart and stop the packa
         seen.push(req.headers);
         const { query } = JSON.parse(raw);
         if (failPool && query.includes('SceneCount')) {
-            res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ errors: [{
+            res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ errors: [{
                 message: `Invalid scene criterion; secret-api-key; ${token}; task-session`
             }] }));
             return;
@@ -138,7 +138,7 @@ test('real detached Stash plugin tasks start, report, restart and stop the packa
         if (diagnostics.includes('Invalid scene criterion')) break;
         await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    assert.match(diagnostics, /TVGuideSceneCount.*Invalid scene criterion/);
+    assert.match(diagnostics, /TVGuideSceneCount.*HTTP 400.*Invalid scene criterion/);
     for (const secret of ['secret-api-key', 'task-session', token]) assert.ok(!diagnostics.includes(secret));
     failPool = false;
     await task('restart');

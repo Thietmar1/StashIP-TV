@@ -44,6 +44,36 @@ test('Stash client sends ApiKey only in headers and surfaces HTTP/GraphQL errors
     await assert.rejects(createStashClient(config, async () => ({ ok: true, json: async () => ({ errors: [{}] }) }))('query X'), /rejected/);
 });
 
+test('GraphQL HTTP validation errors retain status and explanation while redacting credentials', async () => {
+    for (const status of [400, 422]) {
+        const gql = createStashClient({ ...config, sessionCookie: 'session=private-cookie' }, async () => new Response(JSON.stringify({ errors: [
+            { message: `Invalid variable filter; ${config.apiKey}; ${config.token}; private-cookie; https://stash/graphql?key=secret` }, null
+        ] }), { status }));
+        await assert.rejects(gql('query TVGuideSceneCount { invalid }'), (error) => {
+            assert.match(error.message, new RegExp(`TVGuideSceneCount: Stash GraphQL HTTP ${status}: Invalid variable filter`));
+            for (const secret of [config.apiKey, config.token, 'private-cookie', 'key=secret']) assert.ok(!error.message.includes(secret));
+            return true;
+        });
+    }
+    for (const body of ['<html>private secret</html>', JSON.stringify({ message: 'private secret' })]) {
+        await assert.rejects(createStashClient(config, async () => new Response(body, { status: 500 }))('query X'),
+            (error) => error.message === 'X: Stash GraphQL HTTP 500');
+    }
+});
+
+test('generic GraphQL unknown-field messages include the rejected variable path with redaction', async () => {
+    for (const status of [200, 400, 422]) {
+        const gql = createStashClient(config, async () => new Response(JSON.stringify({ errors: [{
+            message: 'unknown field', path: ['variable', 'filter', 'tags', 'invalid_field', config.apiKey]
+        }] }), { status }));
+        await assert.rejects(gql('query TVGuideSceneCount { findScenes { count } }'), (error) => {
+            assert.match(error.message, /unknown field \(path: variable.filter.tags.invalid_field.\[redacted\]\)/);
+            assert.ok(!error.message.includes(config.apiKey));
+            return true;
+        });
+    }
+});
+
 test('stored lineup, pins, names, hidden channels and pool caps are respected', async () => {
     const { gql, calls } = fixture({ prefs: { 'studio:1': { name: 'Renamed', poolCap: 1 }, 'studio:2': { hidden: true } }, pinOrder: ['studio:3'] });
     const guide = await loadGuide(gql);
@@ -133,3 +163,4 @@ test('DST days end at local midnight rather than after a fixed 24 hours', () => 
     assert.equal(nextMidnight(march) - march, 23 * 3600000);
     assert.equal(nextMidnight(october) - october, 25 * 3600000);
 });
+
