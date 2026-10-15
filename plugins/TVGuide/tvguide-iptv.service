@@ -1,0 +1,23 @@
+[Unit]
+Description=Stash TVGuide M3U, XMLTV and live streams
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+Environment=TZ=Europe/Berlin
+EnvironmentFile=/etc/tvguide-iptv.env
+ExecStart=/usr/bin/node /opt/tvguide/tvguide-server.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+KillMode=control-group
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

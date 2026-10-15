@@ -21,3 +21,11 @@ if (process.argv.includes('--watch')) {
 } else {
     await esbuild.build({ ...options, minify: true });
 }
+
+// Optional standalone companion. No npm modules are needed on the Stash host.
+await esbuild.build({
+    entryPoints: ['iptv/index.js'],
+    outfile: 'tvguide-server.js',
+    platform: 'node', target: ['node20'], format: 'cjs', bundle: true,
+    logLevel: 'info'
+});

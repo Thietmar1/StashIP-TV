@@ -296,3 +296,11 @@ Subtleties worth knowing before changing this:
 - **The keyboard handler runs in the capture phase** and stops propagation on
   keys it owns, so any control that interprets arrows itself must be listed in
   `handlesOwnKeys` — otherwise it never receives them.
+
+## Jellyfin / IPTV
+
+TVGuide includes an optional standalone companion for M3U channel playlists,
+XMLTV listings and continuous live MPEG-TS streams. It shares the guide's
+scheduler and saved channel selection. See [IPTV.md](IPTV.md) for setup on
+Debian/Proxmox LXC and Jellyfin. The companion requires Node.js 20+ and FFmpeg;
+the browser plugin works independently as before.
