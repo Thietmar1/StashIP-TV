@@ -1,0 +1,23 @@
+{
+  "engine": "ollama_haven",
+  "analysis_fps": 15,
+  "roi_interval": 30,
+  "timeout_seconds": 10800,
+  "max_speed": 150,
+  "threads": 2,
+  "batch_size": 32,
+  "detrend_window": 2,
+  "norm_window": 4,
+  "keyframe_reduction": true,
+  "balance_global": true,
+  "pov_mode": false,
+  "vr_auto": true,
+  "vr_layout": "sbs",
+  "multi_axis": false,
+  "overwrite": false,
+  "multi_axis_intensity": 5,
+  "random_speed": 3,
+  "smart_limit": true,
+  "auto_home_delay": 1,
+  "auto_home_duration": 1
+}

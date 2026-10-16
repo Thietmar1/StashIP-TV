@@ -1,4 +1,4 @@
-# Funscript Ollama (Prototyp 0.2.0)
+# Funscript Ollama (Prototyp 0.2.1)
 
 Eigenständiges Stash-Plugin, inspiriert vom Tag-Ablauf von
 [FunscriptHaven](https://github.com/stashapp/CommunityScripts/tree/main/plugins/FunscriptHaven).
@@ -15,9 +15,9 @@ Unter **Processing Engine** einen dieser Werte eintragen:
 
 | Wert | Verhalten |
 | --- | --- |
-| `ollama` | Bisheriger Standard: Qwen wählt Bereich/Achse; OpenCV misst die gerichtete Bewegung. |
+| `ollama` | Qwen wählt Bereich/Achse; OpenCV misst die gerichtete Bewegung. |
 | `haven` | Haven-Radialbewegung ohne Ollama. Auch bei ausgeschaltetem Ollama-Server nutzbar. |
-| `ollama_haven` | Qwen wählt den Bereich; darin wird Havens radiale Bewegung ausgewertet. |
+| `ollama_haven` | Standard: Qwen wählt den Bereich; darin wird Havens radiale Bewegung ausgewertet. |
 
 **POV Mode** schaltet auch im `ollama`-Modus auf die radiale Messung mit einem
 Ursprung unten in der Mitte des gewählten Bereichs um. **Balance Global Motion**
@@ -34,7 +34,7 @@ sind Ergebnisse und Geschwindigkeit nicht bitgleich mit dem ursprünglichen Plug
 ohne Beachtung der Großschreibung. **VR Tags** ist anpassbar. **VR Layout**:
 
 - `haven`: unteres linkes Viertel, wie die ursprüngliche Haven-Vorverarbeitung.
-- `sbs`: linkes Bild eines nebeneinander angeordneten Stereovideos.
+- `sbs` (Standard): linkes Bild eines nebeneinander angeordneten Stereovideos.
 - `tb`: oberes Bild eines übereinander angeordneten Stereovideos.
 - `mono`: kein Zuschnitt, auch bei einem VR-Tag.
 
@@ -53,10 +53,10 @@ zusätzliche Achsen ergänzt werden, ohne die Hauptdatei zu überschreiben.
 ## Was Qwen übernimmt
 
 In den Ollama-Modi ist der voreingestellte Server **`http://192.168.178.16:11434`**. Qwen erhält zu
-Beginn, nach erkannten Schnitten und etwa alle 20 Sekunden zwei verkleinerte
+Beginn, nach erkannten Schnitten und etwa alle 30 Sekunden zwei verkleinerte
 JPEG-Bilder. Das Modell wählt einen Bildbereich und eine horizontale oder
 vertikale Bewegungsachse. OpenCV misst anschließend die tatsächliche Bewegung
-zwischen den Bildern, standardmäßig mit ungefähr zehn Auswertungen pro Sekunde.
+zwischen den Bildern, standardmäßig mit ungefähr 15 Auswertungen pro Sekunde.
 Die Bildbreite beträgt höchstens 512 Pixel; es wird kein vollständiges Video
 an Ollama geschickt und es werden keine Vorschaubilder gespeichert.
 
@@ -108,7 +108,7 @@ https://raw.githubusercontent.com/Thietmar1/StashIP-TV/tvguide-iptv/index.yml
 ```
 
 Quellen aktualisieren, **Funscript Ollama** installieren und die Python-Abhängigkeiten
-wie unten beschrieben einrichten. Version 0.2.0 erscheint nach Merge und erfolgreicher
+wie unten beschrieben einrichten. Version 0.2.1 erscheint nach Merge und erfolgreicher
 Veröffentlichung dieses Updates. Die bisherige separate Quelle
 `https://raw.githubusercontent.com/Thietmar1/StashIP-TV/funscript-ollama/index.yml`
 wird aus Kompatibilitätsgründen weiter aktualisiert. Bereits installierte Plugins
@@ -206,13 +206,16 @@ erreichbar sein; interaktiv verbundene Laufwerksbuchstaben gelten dort oft nicht
 1. Unter **Einstellungen → Plugins → Funscript Ollama** bei **Ollama URL**
    `http://192.168.178.16:11434` und bei **Ollama Model** `qwen3-vl:8b-instruct`
    eintragen. Leere Felder verwenden die genannten Standardwerte.
-2. Die Aufgabe **Test Ollama Connection** ausführen. Sie prüft das Modell und
+2. Bei einer bestehenden Installation die Aufgabe **Apply Recommended Generation Settings**
+   ausführen und die Einstellungsseite neu laden, um das unten beschriebene Profil
+   einschließlich des dreistündigen Timeouts zu übernehmen.
+3. Die Aufgabe **Test Ollama Connection** ausführen. Sie prüft das Modell und
    schickt ausschließlich zwei künstliche Testbilder. Eine erfolgreiche
    Verbindung ist noch kein Qualitätsnachweis für echte Videos.
-3. Einer kurzen Testszene den Tag **FunscriptOllama_Process** geben.
-4. **Process Tagged Scenes** ausführen; Fortschritt und Fehler stehen im
+4. Einer kurzen Testszene den Tag **FunscriptOllama_Process** geben.
+5. **Process Tagged Scenes** ausführen; Fortschritt und Fehler stehen im
    Stash-Aufgabenprotokoll. Es gibt keinen Hintergrunddienst.
-5. Die Ausgabe liegt neben dem Video, zum Beispiel `Beispiel.mp4` →
+6. Die Ausgabe liegt neben dem Video, zum Beispiel `Beispiel.mp4` →
    `Beispiel.funscript`. Stashs Scan des betroffenen Medienordners erneut
    ausführen, falls die Datei dort noch nicht erkannt wird.
 
@@ -266,16 +269,42 @@ Das Plugin erfindet keine Kapitelbezeichnungen aus Modellantworten. Ohne bereits
 vorhandene Kapitel oder Stash-Marker gibt es keine inhaltlichen Kapitel zu
 importieren/exportieren; der optionale Abschlussmarker ist davon unabhängig.
 
+## Empfohlenes Startprofil
+
+Die neuen Standardwerte stehen auch in [recommended-settings.json](recommended-settings.json).
+Die Aufgabe **Apply Recommended Generation Settings** speichert dieses Profil
+in Stash. Sie ändert die dort aufgeführten Erzeugungseinstellungen einschließlich
+Timeout und schaltet das Überschreiben vorhandener Dateien aus. Ollama-Adresse,
+Modell, Tag-Namen, benutzerdefinierte VR-Tags und sämtliche Marker-Einstellungen
+bleiben erhalten. Die Aufgabe analysiert keine Videos und stellt keine Ollama-Anfrage.
+Bereits gespeicherte Werte bleiben bei einem normalen Plugin-Update erhalten;
+das Profil wird erst durch die ausdrückliche Aufgabe übernommen.
+
+Als Ausgangspunkt kombiniert `ollama_haven` Qwens Bereichsauswahl mit Havens
+Bewegungsmessung. 15 Messungen pro Sekunde erfassen mehr Bewegungsdetails als
+der bisherige Standard mit 10. Die Bereichsauswahl wird alle 30 Sekunden und
+nach erkannten Schnitten erneuert. Driftbereinigung über 2 Sekunden, lokale
+Normalisierung über 4 Sekunden und die Reduktion auf Wendepunkte bleiben aktiv.
+Die Begrenzung auf 150 Positionspunkte pro Sekunde glättet abrupte Änderungen.
+Diese Werte sind ein Startprofil; eine Qualitätsprüfung an echtem Videomaterial
+steht noch aus. Perspektive, Kamerabewegung und Geschwindigkeit können andere
+Werte oder den gerichteten Modus `ollama` erfordern.
+
+Zusatzachsen bleiben aus, da ihre synthetischen Kurven keine zusätzliche
+gemessene Bewegungsinformation liefern. POV nur bei passender Perspektive
+aktivieren. Bei VR das tatsächliche Layout prüfen: `sbs` passt zu nebeneinander
+angeordneten Bildern; bei übereinander angeordneten Bildern `tb` wählen.
+
 ## Einstellungen
 
 | Einstellung | Standard | Bedeutung |
 | --- | --- | --- |
-| Analysis Frames Per Second | 10 | Zielrate der optischen Messung; 2–30 |
-| Qwen Region Refresh Seconds | 20 | Neue Bildbereichsauswahl; 2–120 Sekunden |
-| Ollama Request Timeout Seconds | 600 | Einschließlich Modellladezeit; 10–1800 |
+| Analysis Frames Per Second | 15 | Zielrate der optischen Messung; 2–30 |
+| Qwen Region Refresh Seconds | 30 | Neue Bildbereichsauswahl; 2–120 Sekunden |
+| Ollama Request Timeout Seconds | 10800 | 3 Stunden je HTTP-Anfrage einschließlich Modellladezeit; 10–10800 |
 | Maximum Position Change Per Second | 150 | Begrenzung für Werte von 0–100; 10–500 |
 | Overwrite Existing Funscript | aus | Vor Überschreiben immer Sicherung erstellen |
-| Processing Engine | `ollama` | `ollama`, `haven` oder `ollama_haven` |
+| Processing Engine | `ollama_haven` | `ollama`, `haven` oder `ollama_haven` |
 | Motion Worker Threads | 2 | Parallele optische Messungen; 1–32 |
 | Maximum Queued Frame Pairs | 32 | Maximale wartende Bildpaare; 1–3000 |
 | Detrend Window Seconds | 2 | Driftbereinigung; 1–10 |
@@ -285,7 +314,7 @@ importieren/exportieren; der optionale Abschlussmarker ist davon unabhängig.
 | Balance Global Motion | an | Modusabhängige Kamerakompensation/Gewichtung |
 | Detect VR Tags | an | Tag-basierte VR-Erkennung |
 | VR Tags | `VR,Virtual Reality,180°,360°` | Kommagetrennte Tag-Namen |
-| VR Layout | `haven` | `haven`, `sbs`, `tb`, `mono` |
+| VR Layout | `sbs` | `haven`, `sbs`, `tb`, `mono` |
 | Generate Additional Axes | aus | Surge, Sway, Twist, Roll, Pitch |
 | Additional Axis Intensity | 5 | 0–10 |
 | Additional Axis Variation Speed | 3 | 0–10 |
@@ -299,9 +328,15 @@ importieren/exportieren; der optionale Abschlussmarker ist davon unabhängig.
 
 Der **Timeout ist pro Installation in Stash einstellbar**, unter
 **Einstellungen → Plugins → Funscript Ollama → Ollama Request Timeout Seconds**.
-600 Sekunden sind ausschließlich der Standard für ein leeres Feld. Ein bereits
-gespeicherter eigener Wert wird durch das Update nicht ersetzt. Der Verbindungstest
-und beide Ollama-Verarbeitungsmodi verwenden diesen Wert für ihre HTTP-Anfragen.
+10800 Sekunden (3 Stunden) sind der Standard für ein leeres Feld. Ein bereits
+gespeicherter eigener Wert wird durch das Update nicht ersetzt: bei Bedarf manuell
+auf `10800` setzen oder das Startprofil anwenden. Der Verbindungstest und beide
+Ollama-Verarbeitungsmodi verwenden diesen Wert für ihre HTTP-Anfragen.
+Das Plugin wartet auf die vollständige Antwort (`stream: false`); im
+Aufgabenprotokoll stehen Beginn und Ende jeder Anfrage. Der Timeout begrenzt die
+Wartezeit auf die Antwort pro HTTP-Anfrage, nicht die gesamte Szene oder Aufgabe.
+Netzwerkfehler, ein Abbruch durch Ollama oder vorgeschaltete Proxy-Timeouts können
+die Anfrage früher beenden. Nach einem Fehler wird kein Ersatzskript erfunden.
 
 Niedrige Bildraten erfassen schnelle Bewegung schlechter. Häufigere Qwen-Anfragen
 erhöhen die Laufzeit und die übertragene Bildmenge. Es wird jeweils eine Szene
