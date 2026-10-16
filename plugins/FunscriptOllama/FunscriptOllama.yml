@@ -46,7 +46,7 @@ settings:
     type: NUMBER
   timeout_seconds:
     displayName: Ollama Request Timeout Seconds
-    description: "Default: 180; range 10–1800. A failed or invalid model response aborts that scene."
+    description: "Default: 600; range 10–1800. CPU inference can take several minutes. A failed or invalid model response aborts that scene."
     type: NUMBER
   max_speed:
     displayName: Maximum Position Change Per Second

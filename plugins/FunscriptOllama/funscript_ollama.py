@@ -27,7 +27,7 @@ DEFAULTS = {
     "trigger_tag": "FunscriptOllama_Process",
     "complete_tag": "FunscriptOllama_Complete",
     "error_tag": "FunscriptOllama_Error",
-    "analysis_fps": 10, "roi_interval": 20, "timeout_seconds": 180,
+    "analysis_fps": 10, "roi_interval": 20, "timeout_seconds": 600,
     "max_speed": 150, "overwrite": False,
 }
 LIMITS = {"analysis_fps": (2, 30), "roi_interval": (2, 120),
