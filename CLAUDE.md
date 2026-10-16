@@ -1,7 +1,15 @@
 # StashIP-TV development
 
-This repository contains only `plugins/StashIP-TV`. GalleryMode, SpriteTab and
-TheaterMode have been removed. Preserve the original AGPL license and notices.
+This repository contains `plugins/StashIP-TV` and the independent experimental
+`plugins/FunscriptOllama`. GalleryMode, SpriteTab and TheaterMode have been
+removed. Preserve the original AGPL license and notices.
+
+Funscript Ollama uses Python/OpenCV plus native Ollama vision/structured JSON.
+Run `python -m unittest discover -s plugins/FunscriptOllama/tests -v` and
+`python tools/package_funscript_ollama.py --output-dir dist/funscript-ollama --revision local --check`.
+Keep its package and `funscript-ollama` installation branch separate from TVGuide.
+Never overwrite media sidecars by default, generate invented timing from model
+responses, install dependencies at task runtime or log access credentials.
 
 Build in `plugins/StashIP-TV`: `npm ci`, `npm run build`.
 Run `npm test -- --runInBand --silent` and `npm run test:iptv`.

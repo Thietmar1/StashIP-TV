@@ -1,0 +1,58 @@
+name: Funscript Ollama
+description: Experimental Qwen-guided optical motion analysis. Creates a single-axis funscript next to tagged videos.
+version: "0.1.0"
+url: https://github.com/Thietmar1/StashIP-TV/tree/main/plugins/FunscriptOllama
+exec:
+  - python
+  - "{pluginDir}/funscript_ollama.py"
+interface: raw
+tasks:
+  - name: Test Ollama Connection
+    description: Check the configured model and run a small synthetic image request. No library video is sent.
+    defaultArgs:
+      mode: test_connection
+  - name: Process Tagged Scenes
+    description: Process scenes tagged FunscriptOllama_Process, sequentially. Existing scripts are preserved by default.
+    defaultArgs:
+      mode: process_scenes
+settings:
+  ollama_url:
+    displayName: Ollama URL
+    description: "Default: http://192.168.178.16:11434. Reachable from the Stash process/container; no /api/chat suffix."
+    type: STRING
+  model:
+    displayName: Ollama Model
+    description: "Default: qwen3-vl:8b-instruct. Must already be installed in Ollama."
+    type: STRING
+  trigger_tag:
+    displayName: Queue Tag
+    description: "Default: FunscriptOllama_Process. Kept on failures so processing can be retried."
+    type: STRING
+  complete_tag:
+    displayName: Completion Tag
+    description: "Default: FunscriptOllama_Complete."
+    type: STRING
+  error_tag:
+    displayName: Error Tag
+    description: "Default: FunscriptOllama_Error."
+    type: STRING
+  analysis_fps:
+    displayName: Analysis Frames Per Second
+    description: "Default: 10; range 2–30. OpenCV measures movement at this rate, not Ollama."
+    type: NUMBER
+  roi_interval:
+    displayName: Qwen Region Refresh Seconds
+    description: "Default: 20; range 2–120. Each refresh sends two sampled frames to your Ollama server."
+    type: NUMBER
+  timeout_seconds:
+    displayName: Ollama Request Timeout Seconds
+    description: "Default: 180; range 10–1800. A failed or invalid model response aborts that scene."
+    type: NUMBER
+  max_speed:
+    displayName: Maximum Position Change Per Second
+    description: "Default: 150; range 10–500 position units/second. Output values range from 0 to 100."
+    type: NUMBER
+  overwrite:
+    displayName: Overwrite Existing Funscript
+    description: "Default: off. When enabled, first preserve the previous file in a uniquely named backup."
+    type: BOOLEAN

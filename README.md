@@ -1,5 +1,9 @@
 # StashIP-TV
 
+Auch in diesem Repository: **[Funscript Ollama](https://github.com/Thietmar1/StashIP-TV/tree/main/plugins/FunscriptOllama)**,
+ein eigenständiger Prototyp zur Qwen-gestützten Bewegungsanalyse über Ollama.
+Er hat eine eigene Plugin-Quelle und verändert die TV-Funktionen nicht.
+
 StashIP-TV macht aus deiner Stash-Bibliothek gemeinsame Live-TV-Kanäle mit
 benutzerdefinierten Namen und XMLTV-Programmführer. Die Kanalverwaltung bleibt
 in Stash; wiedergegeben wird über Jellyfin, Emby, Plex oder den Stashy-Adapter.
