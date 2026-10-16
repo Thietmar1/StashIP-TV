@@ -6,3 +6,11 @@
   date: "2026-10-16 14:58:17"
   path: StashIP-TV.zip
   sha256: 620831eb8c88a1e366e4cee2293f5a7663116fe7818bee58ea98f81cb81055fa
+- id: FunscriptOllama
+  name: Funscript Ollama
+  metadata:
+    description: Experimental Qwen-guided optical motion analysis via Ollama.
+  version: "0.1.1-81f03d899260"
+  date: "2026-10-16 15:11:20"
+  path: FunscriptOllama.zip
+  sha256: a10e1f2b5465aa664f6e7390d9ef559e6b1e62b7b1977420f36853ff26296a9b
