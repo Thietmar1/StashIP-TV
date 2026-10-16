@@ -14,7 +14,7 @@ GalleryMode, SpriteTab und TheaterMode sind aus diesem Repository entfernt.
 ## Funktionen
 
 - Kanäle aus Studios, Darstellern, Tags, Gruppen und gespeicherten Filtern.
-- Eigene Kanalnamen (**Rename → Save name**), Logos, ausgeblendete Kanäle und Pins.
+- Eigene Kanalnamen (**Edit → Save name**), Logos, ausgeblendete Kanäle und Pins.
 - Gemeinsamer deterministischer Sendeplan, tägliche Rotation und optional All Scenes.
 - M3U, XMLTV und fortlaufendes MPEG-TS für Jellyfin und Emby.
 - Gepuffertes HLS und Kanal-/Szenennamen für Stashy, ohne zusätzlichen EPG-Bildschirm.

@@ -1,6 +1,6 @@
 name: StashIP-TV
 description: Custom live channels and EPG for Jellyfin/Emby, with optional Stashy and Plex tuner adapters.
-version: "1.5.1"
+version: "1.5.2"
 url: https://github.com/Thietmar1/StashIP-TV/tree/main/plugins/StashIP-TV
 interface: raw
 errLog: info

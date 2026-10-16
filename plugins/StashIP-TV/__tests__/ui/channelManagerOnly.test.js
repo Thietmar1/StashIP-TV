@@ -98,19 +98,18 @@ describe('channel-management-only browser entry', () => {
         expect(app.element.querySelector('[data-channel-id="tag:7"]')).not.toBeNull();
     });
 
-    it('offers an explicit rename action, saves it without changing the source and resets to the source name', async () => {
+    it('renames through Edit, saves without changing the source and resets to the source name', async () => {
         const { gql, config } = client();
         app = startChannelManager({ gql });
         await app.ready; await flush();
         app.open(); await flush();
         let row = app.element.querySelector('[data-channel-id="studio:1"]');
-        row.querySelector('.tvguide-manager-rename').click();
+        row.querySelector('.tvguide-manager-edit').click();
         let form = row.querySelector('form');
         // Opening the editor rebuilds the catalogue rows.
         row = app.element.querySelector('[data-channel-id="studio:1"]');
         form = row.querySelector('form');
         const input = form.querySelector('input');
-        expect(document.activeElement).toBe(input);
         input.value = '  My live channel & more  ';
         expect(config().tvguide_state.tvguide_channel_prefs).not.toContain('live channel');
         form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));

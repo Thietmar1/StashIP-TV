@@ -429,18 +429,6 @@ export function createManager({ store }) {
                             onchange: (event) => store.dispatch({ type: Events.SET_CHANNEL_PREF, channelId: channel.id,
                                 patch: { includeSubStudios: event.target.checked } })
                         }), ' Include sub-studios') : null,
-                        el('button', {
-                            class: 'tvguide-manager-rename', type: 'button',
-                            'aria-label': 'Rename channel', text: 'Rename',
-                            onclick: () => {
-                                editing.add(channel.id);
-                                renderedSignature = '';
-                                render(store.getState());
-                                root.querySelectorAll('[data-channel-id]').forEach((item) => {
-                                    if (item.dataset.channelId === channel.id) item.querySelector('input[type="text"]')?.focus();
-                                });
-                            }
-                        }),
                         toggleButton({
                             label: pinned ? `Unpin ${channel.name}` : `Pin ${channel.name} to the top`,
                             text: pinned ? '★' : '☆',
