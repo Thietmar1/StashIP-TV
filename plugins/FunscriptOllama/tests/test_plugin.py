@@ -302,11 +302,18 @@ class MotionTests(unittest.TestCase):
             finally:
                 cap.release()
             model = type("Model", (), {"region": lambda self, frames: REGION})()
-            script = plugin.analyze_video(path, plugin.configuration({"engine": "ollama"}), model)
+            log = FakeLog()
+            script = plugin.analyze_video(path, plugin.configuration({"engine": "ollama"}), model, log=log)
             self.assertGreater(len(script["actions"]), 5)
             self.assertGreater(max(a["pos"] for a in script["actions"])-min(a["pos"] for a in script["actions"]), 10)
             self.assertGreater(script["actions"][-1]["at"], 7000)
             self.assertTrue(script["metadata"]["experimental"])
+            messages = "\n".join(log.messages)
+            for completed in ("Video decoder opened", "Video metadata validated", "First video frame decoded",
+                              "Tracking region selected", "Motion segment processed", "Video decoding completed",
+                              "Motion analysis and script validation completed"):
+                self.assertIn(completed, messages)
+            self.assertLess(len(log.messages), 20)  # No per-frame log flooding.
 
     def test_unreadable_video_produces_no_script(self):
         with self.assertRaisesRegex(ValueError, "cannot open"):
@@ -338,6 +345,30 @@ class MotionTests(unittest.TestCase):
 
 
 class FilesAndQueueTests(unittest.TestCase):
+    def test_step_logs_distinguish_saved_file_from_completed_scene_after_failure(self):
+        for failure in (None, "publication", "tags"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                video = Path(directory) / "video.mp4"
+                video.write_bytes(b"fixture")
+                fake = FakeStash([{"id": "1", "files": [{"path": str(video)}], "tags": [{"id": "1"}]}])
+                log = FakeLog()
+                data = {"actions": [{"at": 0, "pos": 20}, {"at": 1000, "pos": 80}]}
+                settings = plugin.configuration({"engine": "haven", "import_chapters": False, "export_chapters": False})
+                with patch.object(plugin, "analyze_video", return_value=data), \
+                     patch.object(plugin, "save_script", wraps=plugin.save_script,
+                                  side_effect=OSError("publication failed") if failure == "publication" else None), \
+                     patch.object(fake, "update_scene", wraps=fake.update_scene,
+                                  side_effect=RuntimeError("tag mutation failed") if failure == "tags" else None):
+                    summary = plugin.process_queue(fake, settings, log)
+                messages = "\n".join(log.messages)
+                self.assertEqual(video.with_suffix(".funscript").exists(), failure != "publication")
+                self.assertEqual("Step OK: Primary script saved" in messages, failure != "publication")
+                self.assertEqual("Step OK: Stash completion tags updated" in messages, failure is None)
+                self.assertEqual("Step OK: Scene processing completed" in messages, failure is None)
+                self.assertEqual(summary["failed"], int(failure is not None))
+                self.assertNotIn("Chapter export completed", messages)
+                self.assertNotIn("Chapter import completed", messages)
+
     def test_queue_snapshot_requests_only_ids_and_keeps_pending_items_after_tag_removal(self):
         fake = FakeStash([{"id": "1", "files": [], "tags": [{"id": "1"}]},
                           {"id": "2", "files": [], "tags": [{"id": "1"}]}])

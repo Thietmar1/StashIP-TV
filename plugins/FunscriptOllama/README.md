@@ -386,6 +386,16 @@ Dies begrenzt die Parallelität, garantiert aber keine feste RAM-Obergrenze.
 
 Die Aufgabenprotokolle nennen Decoder, Originalauflösung und vor Ollama-Anfragen
 unter Linux den aktuellen/maximalen RAM-Verbrauch des Plugin-Prozesses.
+Zusätzlich melden sie abgeschlossene Schritte mit **`Step OK:`**: Stash-Anbindung,
+validierte Einstellungen, Warteschlange, Szenendaten, geöffnetes Video, Metadaten,
+erstes Bild, Ollama-Antwort, validierter Bildbereich, ausgewerteter Abschnitt,
+abgeschlossene Analyse, Kapitel, gespeicherte Hauptdatei/Zusatzachsen und
+aktualisierte Stash-Tags. Abschnittsmeldungen enthalten die Position im Video und
+die Zahl der Messpunkte/Keyframes. Es gibt keine Meldung pro Einzelbild.
+Erfolge werden erst nach dem jeweiligen Schritt protokolliert. Scheitert etwa die
+Tag-Aktualisierung nach dem Speichern, bleibt die erfolgreiche Dateimeldung stehen,
+aber die Szene erhält keine Abschlussmeldung. Deaktivierte Schritte werden nicht
+als ausgeführt gemeldet. Zugangsschlüssel und Bildinhalte werden nicht protokolliert.
 Bei großen Warteschlangen hält das Plugin nur die Szenen-IDs als Snapshot;
 Dateipfade und Tags werden jeweils für die nächste Szene abgefragt.
 Nach jeder Szene werden auch zyklische Referenzen auf Bildpuffer freigegeben.

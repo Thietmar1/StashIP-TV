@@ -182,7 +182,7 @@ class Ollama:
                 raise ValueError("Ollama response exceeds 2 MiB")
             result = json.loads(data)
             if self.log:
-                self.log.info(f"Ollama {path} answered after {time.monotonic()-started:.1f} seconds")
+                self.log.info(f"Step OK: Ollama {path} answered after {time.monotonic()-started:.1f} seconds; response JSON decoded")
             return result
         except HTTPError as exc:
             # Do not echo response bodies: a proxy could include credentials.
@@ -195,6 +195,8 @@ class Ollama:
         capabilities = data.get("capabilities", [])
         if capabilities and "vision" not in capabilities:
             raise ValueError("Configured Ollama model does not advertise vision support")
+        if self.log:
+            self.log.info("Step OK: Ollama model information checked")
 
     def region(self, frames):
         import cv2
@@ -222,6 +224,8 @@ class Ollama:
                 region = validate_region(value)
                 if self.log and region["active"] and region["roi"] != value["roi"]:
                     self.log.info("Qwen tracking region padded to the minimum width/height of 0.05")
+                if self.log:
+                    self.log.info(f"Step OK: Qwen tracking region validated; active={region['active']}, confidence={region['confidence']:.2f}")
                 return region
             except ValueError as exc:
                 if attempt:
@@ -265,7 +269,7 @@ def open_video(path, settings, log=None):
         cap.release()
         raise ValueError("OpenCV cannot open this video/codec")
     if log:
-        log.info(f"Video decoder: {cap.getBackendName()}; {int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x"
+        log.info(f"Step OK: Video decoder opened: {cap.getBackendName()}; {int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x"
                  f"{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}; requested decoder threads {settings['decoder_threads']}")
     return cap
 
@@ -410,6 +414,8 @@ def analyze_video(path, settings, ollama, progress=lambda value: None, vr=False,
         count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
         if not math.isfinite(fps) or fps <= 0 or not math.isfinite(count) or count < 3:
             raise ValueError("Video needs valid frame rate and frame count")
+        if log:
+            log.info(f"Step OK: Video metadata validated; {fps:.3f} fps, {int(count)} frames, {count/fps:.1f} seconds")
         expected_ms = count / fps * 1000
         stride = max(1, round(fps / settings["analysis_fps"]))
         index, previous, previous_color = 0, None, None
@@ -421,7 +427,10 @@ def analyze_video(path, settings, ollama, progress=lambda value: None, vr=False,
             pending.clear()
         def finish_segment():
             drain()
-            segments.append(segment_actions(samples, settings["max_speed"], settings))
+            points = segment_actions(samples, settings["max_speed"], settings)
+            segments.append(points)
+            if log and points:
+                log.info(f"Step OK: Motion segment processed through {samples[-1][0]/1000:.1f}s; {len(samples)} samples, {len(points)} keyframes")
         while True:
             ok = cap.grab()
             if not ok:
@@ -443,6 +452,8 @@ def analyze_video(path, settings, ollama, progress=lambda value: None, vr=False,
             if previous is None:
                 previous, previous_color = gray, frame
                 samples = [(at, 0.0)]
+                if log:
+                    log.info("Step OK: First video frame decoded and prepared for analysis")
                 continue
             cut = is_cut(previous, gray)
             if cut:
@@ -456,6 +467,8 @@ def analyze_video(path, settings, ollama, progress=lambda value: None, vr=False,
                 region = (ollama.region([previous_color, frame]) if settings["engine"] != "haven" else
                           {"active": True, "confidence": 1.0, "roi": [0, 0, 1, 1], "axis": "y"})
                 regions.append({"at": at, **region})
+                if log:
+                    log.info(f"Step OK: Tracking region selected at {at/1000:.1f}s; active={region['active']}")
                 last_refresh = at
                 samples = [(at, 0.0)]
             else:
@@ -469,10 +482,14 @@ def analyze_video(path, settings, ollama, progress=lambda value: None, vr=False,
             raise ValueError("Video decoding ended substantially before its reported end")
         if last_at < expected_ms * 0.5:
             raise ValueError("Decoded duration is inconsistent with video metadata")
+        if log:
+            log.info(f"Step OK: Video decoding completed; {index} frames, analyzed through {last_at/1000:.1f}s")
         finish_segment()
         actions = finalize_actions(segments, settings["max_speed"])
         if not any(r["active"] for r in regions) or max(a["pos"] for a in actions)-min(a["pos"] for a in actions) < 3:
             raise ValueError("No reliable motion was measured; no output file was created")
+        if log:
+            log.info(f"Step OK: Motion analysis and script validation completed; {len(actions)} actions, {len(regions)} tracking regions")
         return {"version": "1.0", "inverted": False, "range": 100, "actions": actions,
                 "metadata": {"creator": f"Funscript Ollama {VERSION}", "model": settings["model"],
                              "experimental": True, "engine": settings["engine"],
@@ -482,7 +499,7 @@ def analyze_video(path, settings, ollama, progress=lambda value: None, vr=False,
         cap.release()
 
 
-def save_script(path, script, overwrite=False):
+def save_script(path, script, overwrite=False, log=None):
     """Atomic publication; never replace an existing file unless explicitly enabled."""
     path = Path(path)
     descriptor, temporary = tempfile.mkstemp(prefix=".funscript-", suffix=".tmp", dir=path.parent)
@@ -496,6 +513,8 @@ def save_script(path, script, overwrite=False):
                 backup = path.with_name(path.name + f".{time.time_ns()}.bak")
                 with path.open("rb") as source, backup.open("xb") as target:
                     shutil.copyfileobj(source, target)
+                if log:
+                    log.info("Step OK: Existing sidecar backup created")
             os.replace(temporary, path)
         else:
             # Hard-link publication is atomic and fails if the destination exists.
@@ -561,7 +580,8 @@ def secondary_scripts(path, script, settings, log):
             continue
         points = finalize_actions([points], settings["max_speed"])
         save_script(target, {"version": "1.0", "inverted": False, "range": 100, "actions": points},
-                    settings["overwrite"])
+                    settings["overwrite"], log=log)
+        log.info(f"Step OK: Additional axis {name} saved; {len(points)} actions")
         count += 1
     return count
 
@@ -570,9 +590,10 @@ def marker_steps(stash, scene_id, script, settings, log):
     from chapters import import_chapters, completion_marker
     if settings["import_chapters"]:
         count = import_chapters(stash, scene_id, script, settings["marker_tolerance"])
-        log.info(f"Scene {scene_id}: imported {count} new chapter markers")
+        log.info(f"Scene {scene_id}: Step OK: Chapter import completed; {count} new markers")
     if settings["add_marker"]:
-        completion_marker(stash, scene_id, settings["marker_tolerance"])
+        count = completion_marker(stash, scene_id, settings["marker_tolerance"])
+        log.info(f"Scene {scene_id}: Step OK: Completion marker checked; {count} created")
 
 
 def import_existing(stash, settings, log, all_scenes=False):
@@ -586,8 +607,11 @@ def import_existing(stash, settings, log, all_scenes=False):
             for item in scene.get("files", []):
                 path = Path(item["path"]).with_suffix(".funscript")
                 if path.is_file():
-                    result["markers"] += import_chapters(stash, scene["id"], load_script(path),
-                                                         settings["marker_tolerance"])
+                    script = load_script(path)
+                    log.info(f"Scene {scene['id']}: Step OK: Existing sidecar loaded for chapter import")
+                    added = import_chapters(stash, scene["id"], script, settings["marker_tolerance"])
+                    result["markers"] += added
+                    log.info(f"Scene {scene['id']}: Step OK: Chapter import completed; {added} new markers")
             result["scenes"] += 1
         except Exception as exc:
             result["failed"] += 1
@@ -606,6 +630,7 @@ def process_queue(stash, settings, log):
     scenes = queue.scenes()
     summary = {"created": 0, "skipped": 0, "failed": 0}
     log.info(f"Queued scenes: {len(scenes)}; processing sequentially")
+    log.info("Step OK: Queue snapshot loaded")
     for i, scene in enumerate(scenes):
         try:
             scene = stash.find_scene(scene["id"], fragment="id files { path } tags { id name }") or scene
@@ -615,9 +640,11 @@ def process_queue(stash, settings, log):
             path = Path(files[0]["path"])
             if not path.is_file():
                 raise ValueError("Video path is not accessible inside the Stash runtime")
+            log.info(f"Scene {scene['id']}: Step OK: Scene details and local video path checked ({i+1}/{len(scenes)})")
             output = path.with_suffix(".funscript")
             if output.exists() and not settings["overwrite"]:
                 existing = load_script(output)
+                log.info(f"Scene {scene['id']}: Step OK: Existing primary script loaded")
                 secondary_scripts(path, existing, settings, log)
                 marker_steps(stash, scene["id"], existing, settings, log)
                 summary["skipped"] += 1
@@ -630,17 +657,21 @@ def process_queue(stash, settings, log):
             if settings["export_chapters"]:
                 previous = load_script(output) if output.exists() else None
                 export_chapters(stash, scene["id"], script, previous)
-            save_script(output, script, settings["overwrite"])
+                log.info(f"Scene {scene['id']}: Step OK: Chapter export completed; {len(script.get('metadata', {}).get('chapters', []))} chapters")
+            save_script(output, script, settings["overwrite"], log=log)
+            log.info(f"Scene {scene['id']}: Step OK: Primary script saved; {len(script['actions'])} actions")
             secondary_scripts(path, script, settings, log)
             marker_steps(stash, scene["id"], script, settings, log)
             queue.status(scene["id"], True)
+            log.info(f"Scene {scene['id']}: Step OK: Stash completion tags updated")
             summary["created"] += 1
-            log.info(f"Scene {scene['id']}: script saved ({len(script['actions'])} actions)")
+            log.info(f"Scene {scene['id']}: Step OK: Scene processing completed")
         except Exception as exc:
             summary["failed"] += 1
             log.error(f"Scene {scene['id']}: {exc}")
             try:
                 queue.status(scene["id"], False)
+                log.info(f"Scene {scene['id']}: Error status saved; queue tag retained")
             except Exception as tag_exc:
                 log.error(f"Could not update error tag: {tag_exc}")
         finally:
@@ -657,6 +688,7 @@ def run(payload, stash_factory=None, log=None):
     if log is None:
         import stashapi.log as log
     stash = stash_factory(payload["server_connection"])
+    log.info(f"Step OK: Stash client initialized; Funscript Ollama {VERSION}")
     mode = payload.get("args", {}).get("mode", "process_scenes")
     if mode == "apply_recommended":
         # configure_plugin merges these selected keys with the current plugin
@@ -666,6 +698,7 @@ def run(payload, stash_factory=None, log=None):
         return {"output": "Recommended generation settings applied. Reload plugin settings to see the values."}
     raw = stash.get_configuration(fragment="plugins").get("plugins", {}).get(PLUGIN_ID, {})
     settings = configuration(raw)
+    log.info(f"Step OK: Plugin settings validated; engine={settings['engine']}, Ollama timeout={settings['timeout_seconds']} seconds")
     if mode in ("import_chapters", "import_all_chapters"):
         summary = import_existing(stash, settings, log, all_scenes=mode == "import_all_chapters")
         return {"output": f"Scanned: {summary['scenes']}; imported markers: {summary['markers']}; failed: {summary['failed']}",
