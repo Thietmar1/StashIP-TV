@@ -1,4 +1,4 @@
-# Funscript Ollama (Prototyp 0.1.0)
+# Funscript Ollama (Prototyp 0.1.1)
 
 Eigenständiges Stash-Plugin, inspiriert vom Tag-Ablauf von
 [FunscriptHaven](https://github.com/stashapp/CommunityScripts/tree/main/plugins/FunscriptHaven).
@@ -189,7 +189,7 @@ Stash-Datenbankstatus, falls dessen anschließende Tag-Aktualisierung fehlschlä
 | --- | --- | --- |
 | Analysis Frames Per Second | 10 | Zielrate der optischen Messung; 2–30 |
 | Qwen Region Refresh Seconds | 20 | Neue Bildbereichsauswahl; 2–120 Sekunden |
-| Ollama Request Timeout Seconds | 180 | Einschließlich Modellladezeit; 10–1800 |
+| Ollama Request Timeout Seconds | 600 | Einschließlich Modellladezeit; 10–1800 |
 | Maximum Position Change Per Second | 150 | Begrenzung für Werte von 0–100; 10–500 |
 | Overwrite Existing Funscript | aus | Vor Überschreiben immer Sicherung erstellen |
 
@@ -197,6 +197,13 @@ Niedrige Bildraten erfassen schnelle Bewegung schlechter. Häufigere Qwen-Anfrag
 erhöhen die Laufzeit und die übertragene Bildmenge. Es wird jeweils eine Szene
 verarbeitet; die Geschwindigkeit hängt von Video-Decoding, CPU und Ollama ab.
 Keine automatischen Modell-Downloads und keine stillen Ersatzkurven bei Fehlern.
+
+Auf einem reinen CPU-Server können schon zwei kleine Bilder mehrere Minuten
+benötigen. Bei Zeitüberschreitungen den Timeout erhöhen; für weniger Modellaufrufe
+das Regionsintervall beispielsweise auf 120 Sekunden setzen. Erkannte Schnitte
+lösen trotzdem eine neue Auswahl aus. Die automatische Analyse kann deutlich
+länger als die Videolaufzeit dauern. GPU-Beschleunigung wird in Ollama eingerichtet,
+nicht durch dieses Stash-Plugin. Den aktuellen Modellstatus zeigt Ollamas `/api/ps`.
 
 ## Entwicklung und Prüfung
 
@@ -209,9 +216,14 @@ python tools/package_funscript_ollama.py --output-dir dist/funscript-ollama --re
 Tests prüfen den echten lokalen HTTP-Transport mit einem Ollama-Testserver,
 JSON-Validierung, optische Messung an einem synthetischen Video, Dateischutz,
 Grenzwerte und den Stash-Tag-Ablauf mit einem Test-Client. Sie führen keine
-Inferenz mit einem echten Qwen-Modell aus. Die GitHub-Matrix verwendet Linux/
-Windows und Python 3.11/3.13. Ein End-to-End-Test in deinem Stash-Container mit
-deinem Ollama-Server und eine manuelle Qualitätsprüfung stehen noch aus.
+Inferenz mit einem echten Qwen-Modell aus. Zusätzlich wurde der Vision-/JSON-Aufruf
+am 16.10.2026 mit zwei künstlichen Bildern gegen den angegebenen Ollama-Server
+geprüft: Ollama 0.34.0, Modell vorhanden, gültige strukturierte Antwort nach etwa
+165 Sekunden bei CPU-Ausführung. Das Modell meldete dabei keine sichere Bewegung;
+der Verbindungstest ist daher kein Nachweis brauchbarer Bewegungsfolgen.
+Die GitHub-Matrix verwendet Linux/Windows und Python 3.11/3.13. Ein End-to-End-Test
+in deinem Stash-Container mit echtem Videomaterial und eine manuelle
+Qualitätsprüfung stehen noch aus.
 
 Lizenz: AGPL-3.0, siehe beiliegende LICENCE. FunscriptHaven ist die Referenz für
 den Bedienablauf; OpenCV, NumPy und stashapp-tools werden separat installiert

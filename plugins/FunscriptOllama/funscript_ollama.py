@@ -20,14 +20,14 @@ from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 PLUGIN_ID = "FunscriptOllama"
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 DEFAULTS = {
     "ollama_url": "http://192.168.178.16:11434",
     "model": "qwen3-vl:8b-instruct",
     "trigger_tag": "FunscriptOllama_Process",
     "complete_tag": "FunscriptOllama_Complete",
     "error_tag": "FunscriptOllama_Error",
-    "analysis_fps": 10, "roi_interval": 20, "timeout_seconds": 180,
+    "analysis_fps": 10, "roi_interval": 20, "timeout_seconds": 600,
     "max_speed": 150, "overwrite": False,
 }
 LIMITS = {"analysis_fps": (2, 30), "roi_interval": (2, 120),
