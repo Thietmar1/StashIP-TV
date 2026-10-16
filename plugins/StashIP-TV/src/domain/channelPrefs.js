@@ -1,5 +1,5 @@
 /**
- * Per-channel presentation preferences.
+ * Per-channel preferences: presentation and studio scene scope.
  *
  * Deliberately stored separately from the lineup. The lineup says *which*
  * sources become channels; prefs say how a channel is presented. Keying prefs
@@ -31,6 +31,7 @@ function validatePref(pref) {
     if (typeof pref.name === 'string' && pref.name.trim()) out.name = pref.name.trim();
     if (typeof pref.logoUrl === 'string' && pref.logoUrl.trim()) out.logoUrl = pref.logoUrl.trim();
     if (pref.hidden === true) out.hidden = true;
+    if (typeof pref.includeSubStudios === 'boolean') out.includeSubStudios = pref.includeSubStudios;
 
     const cap = Number.parseInt(pref.poolCap, 10);
     if (Number.isFinite(cap) && cap > 0) out.poolCap = cap;
@@ -72,9 +73,10 @@ export function serializePrefs(prefs) {
 export function setPref(prefs, channelId, patch) {
     const merged = { ...(prefs[channelId] || {}), ...patch };
 
-    // An explicit null/undefined/false clears a field rather than storing it.
+    // False clears presentation flags. Studio scope keeps an explicit false:
+    // missing/null means the compatible default of including descendants.
     for (const [key, value] of Object.entries(patch)) {
-        if (value == null || value === false || value === '') delete merged[key];
+        if (value == null || (value === false && key !== 'includeSubStudios') || value === '') delete merged[key];
     }
 
     const next = { ...prefs };
@@ -150,7 +152,7 @@ export function poolCapFor(prefs, channelId, defaultCap) {
 }
 
 /**
- * Apply renames, logo overrides and hiding.
+ * Apply renames, logo overrides, hiding and studio scene scope.
  *
  * Returns new channel objects rather than mutating, so the raw resolved list
  * stays intact and prefs can be re-applied when they change.
@@ -162,15 +164,20 @@ export function applyPrefs(channels, prefs) {
         const pref = prefs[channel.id];
         if (pref?.hidden) continue;
 
-        if (!pref || (!pref.name && !pref.logoUrl)) {
+        const studioFilter = channel.source === 'studio' ? channel.sceneFilter?.studios : null;
+        const depth = pref?.includeSubStudios === false ? 0 : -1;
+        const changeDepth = studioFilter && studioFilter.depth !== depth;
+
+        if ((!pref || (!pref.name && !pref.logoUrl)) && !changeDepth) {
             out.push(channel);
             continue;
         }
 
         out.push({
             ...channel,
-            name: pref.name || channel.name,
-            logo: pref.logoUrl ? { type: 'image', url: pref.logoUrl } : channel.logo
+            name: pref?.name || channel.name,
+            logo: pref?.logoUrl ? { type: 'image', url: pref.logoUrl } : channel.logo,
+            ...(changeDepth ? { sceneFilter: { ...channel.sceneFilter, studios: { ...studioFilter, depth } } } : {})
         });
     }
 

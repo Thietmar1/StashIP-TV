@@ -65,6 +65,13 @@ const buttonLabelled = (root, pattern) =>
     );
 
 describe('active channel view', () => {
+    it('offers sub-studio selection only for included studio channels', () => {
+        const { manager } = mount();
+        expect(rowFor(manager, 'studio:1').querySelector('.tvguide-manager-substudios input').checked).toBe(true);
+        expect(rowFor(manager, 'studio:3').querySelector('.tvguide-manager-substudios')).toBeNull();
+        const tagView = mount({ managerSource: 'tag', allChannels: CATALOG.tag });
+        expect(tagView.manager.element.querySelector('.tvguide-manager-substudios')).toBeNull();
+    });
     it('shows only selected non-hidden channels and allows hidden channels to be recovered', () => {
         const { store, manager } = mount({ managerView: 'active', prefs: { 'studio:2': { hidden: true } } });
         expect(rowFor(manager, 'studio:1')).not.toBeNull();

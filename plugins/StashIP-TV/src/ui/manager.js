@@ -421,6 +421,14 @@ export function createManager({ store }) {
                         onclick: () => toggleIncluded(state, source, channel, included)
                     }),
                     included ? [
+                        source === 'studio' ? el('label', {
+                            class: 'tvguide-manager-substudios',
+                            title: 'Include scenes from all descendant studios in this channel. Uncheck for scenes assigned directly to this studio.'
+                        }, el('input', {
+                            type: 'checkbox', checked: pref?.includeSubStudios !== false,
+                            onchange: (event) => store.dispatch({ type: Events.SET_CHANNEL_PREF, channelId: channel.id,
+                                patch: { includeSubStudios: event.target.checked } })
+                        }), ' Include sub-studios') : null,
                         el('button', {
                             class: 'tvguide-manager-rename', type: 'button',
                             'aria-label': 'Rename channel', text: 'Rename',

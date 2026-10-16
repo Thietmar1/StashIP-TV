@@ -57,6 +57,25 @@ describe('channel-management-only browser entry', () => {
         expect(config().tvguide_state.unknown_state).toBe('keep too');
     });
 
+    it('saves the per-studio sub-studio checkbox and restores it without changing other settings', async () => {
+        const { gql, config } = client();
+        app = startChannelManager({ gql });
+        await app.ready; await flush(); app.open();
+        let checkbox = app.element.querySelector('.tvguide-manager-substudios input');
+        expect(checkbox.checked).toBe(true);
+        checkbox.checked = false; checkbox.dispatchEvent(new Event('change'));
+        await flush();
+        expect(JSON.parse(config().tvguide_state.tvguide_channel_prefs)['studio:1'].includeSubStudios).toBe(false);
+        expect(config().iptv_04_token).toBe('keep-private-token');
+        app.destroy(); app = startChannelManager({ gql });
+        await app.ready; await flush(); app.open();
+        checkbox = app.element.querySelector('.tvguide-manager-substudios input');
+        expect(checkbox.checked).toBe(false);
+        checkbox.checked = true; checkbox.dispatchEvent(new Event('change'));
+        await flush();
+        expect(JSON.parse(config().tvguide_state.tvguide_channel_prefs)['studio:1'].includeSubStudios).toBe(true);
+    });
+
     it('restores the selected view after reopening the plugin', async () => {
         const { gql, config } = client();
         app = startChannelManager({ gql });

@@ -289,6 +289,31 @@ sowohl eigene Kanalnamen als auch ursprüngliche Namen.
 - Der Kanaltyp bleibt über die Typauswahl wählbar. Ansicht und Kanaländerungen
   werden getrennt gespeichert; ein Ansichtswechsel ändert keine TV-Auswahl.
 
+### Unterstudios pro Studio-Kanal
+
+Bei ausgewählten Studio-Kanälen steht direkt in der Kanalzeile die Checkbox
+**Include sub-studios**:
+
+- **Aktiviert:** Der Kanal enthält auch Szenen aller untergeordneten Studios,
+  einschließlich tieferer Ebenen.
+- **Deaktiviert:** Der Kanal enthält nur Szenen, die diesem Studio direkt
+  zugeordnet sind.
+
+Die Auswahl wird pro Kanal gespeichert und gilt für denselben gemeinsamen
+Sendeplan in Jellyfin, Emby, Plex und im App-Adapter. Für bestehende Kanäle ist
+sie standardmäßig aktiviert, entsprechend dem bisherigen Verhalten. Der
+Kanalname und die Kanal-ID bleiben erhalten.
+
+Ein Oberstudio kann über **All available channels → Add** manuell aufgenommen
+werden, auch wenn es keine eigenen Szenen besitzt. Ohne Unterstudio-Szenen kann
+ein solcher Kanal leer sein und wird dann nicht als spielbarer Kanal exportiert.
+Die Szenen laufen im gewählten Studio-Kanal; weitere Studio-Kanäle lassen sich
+unabhängig davon auswählen.
+
+Änderungen übernimmt der Server beim nächsten Snapshot-Refresh (spätestens nach
+fünf Minuten). Für die sofortige Übernahme **Stop IPTV Server → Start IPTV Server**
+ausführen und die Kanäle bzw. Programmdaten im Client aktualisieren.
+
 ### Kanäle auf nativen App-Startseiten
 
 Stashy und Mirage verwenden eigene Oberflächen. JavaScript-Kacheln auf der
