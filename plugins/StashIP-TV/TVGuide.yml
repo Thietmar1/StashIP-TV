@@ -1,0 +1,117 @@
+name: StashIP-TV
+description: Custom live channels and EPG for Jellyfin/Emby, with optional Stashy and Plex tuner adapters.
+version: "1.4.0"
+url: https://github.com/Thietmar1/StashIP-TV/tree/main/plugins/StashIP-TV
+interface: raw
+errLog: info
+exec:
+  - node
+  - "{pluginDir}/tvguide-server.js"
+  - --plugin-task
+tasks:
+  - name: Start IPTV Server
+    description: Start the M3U/XMLTV live server in the background using the IPTV plugin settings. Requires Node.js 20+ and FFmpeg.
+    defaultArgs:
+      operation: start
+  - name: Stop IPTV Server
+    description: Stop the IPTV server and its active streams.
+    defaultArgs:
+      operation: stop
+  - name: Restart IPTV Server
+    description: Restart the IPTV server to apply changed settings or an installed plugin update.
+    defaultArgs:
+      operation: restart
+  - name: IPTV Server Status
+    description: Check the IPTV instance and return its M3U and XMLTV URLs in the task output.
+    defaultArgs:
+      operation: status
+ui:
+  javascript:
+    - tvguide.js
+  css:
+    - tvguide.css
+settings:
+  iptv_01_stash_url:
+    displayName: IPTV Stash URL
+    description: "Optional. Default is the local Stash task connection. Set this to match Stash's configured external media URL origin if needed."
+    type: STRING
+  iptv_02_api_key:
+    displayName: IPTV Stash API Key
+    description: "Recommended for long-running IPTV playback. Use your Stash API key from Settings > Security. If empty, the current Stash task session is used until it expires."
+    type: STRING
+  iptv_03_public_url:
+    displayName: IPTV Public URL
+    description: "Required. Address reachable from Jellyfin, e.g. http://192.168.1.50:9898 for the Stash LXC."
+    type: STRING
+  iptv_04_token:
+    displayName: IPTV Access Token
+    description: "Required. A separate random token of at least 24 letters/digits/hyphens/underscores. Append ?token=YOUR_TOKEN to the playlist and EPG URLs. Do not use your Stash API key."
+    type: STRING
+  iptv_05_host:
+    displayName: IPTV Listen Address
+    description: "Default 0.0.0.0 (LAN access). Use 127.0.0.1 for local access only."
+    type: STRING
+  iptv_06_port:
+    displayName: IPTV Port
+    description: "Default 9898. Must match the port in IPTV Public URL."
+    type: NUMBER
+  iptv_07_epg_days:
+    displayName: IPStashIP-TV Days
+    description: "Days of XMLTV listings including today. Default 3, range 1-7."
+    type: NUMBER
+  iptv_08_max_streams:
+    displayName: IPTV Maximum Streams
+    description: "Maximum concurrent FFmpeg viewers. Default 2, range 1-32."
+    type: NUMBER
+  iptv_09_timezone:
+    displayName: IPTV Timezone
+    description: "Use the client timezone, e.g. Europe/Berlin. Default is the Stash server's timezone."
+    type: STRING
+  iptv_10_ffmpeg:
+    displayName: IPTV FFmpeg Path
+    description: "Optional override. Otherwise uses Stash's FFmpeg path or ffmpeg from PATH."
+    type: STRING
+  iptv_11_first_channel_number:
+    displayName: IPTV First Channel Number
+    description: "First channel number in M3U and XMLTV. Default 12 (reserves 1-11 for existing tuners). Range 1-999999; zero/empty uses 12. Numbering follows the StashIP-TV lineup; empty channels reserve their number. Stop/start the IPTV server and refresh Jellyfin after changing this."
+    type: NUMBER
+  iptv_12_stashy_adapter:
+    displayName: Enable Stashy Adapter (Prototype)
+    description: "Expose a read-only virtual Stash library at IPTV Public URL + /stashy. Add it as a separate server in Stashy, using the IPTV Access Token as its API key. Channel and current scene names are shown. Requires a device playback check on iOS/tvOS. Stop/start the server after changing this."
+    type: BOOLEAN
+  iptv_13_plex_tuner:
+    displayName: Enable Plex HDHomeRun Tuner (Prototype)
+    description: "Expose the same channels and XMLTV guide to Plex as a virtual tuner. Off by default. Requires Plex Tuner Allowed IPs. Add IPTV Public URL manually in Plex Live TV & DVR; no multicast discovery. Stop/start after changes. Emby can use the existing M3U/XMLTV URLs directly."
+    type: BOOLEAN
+  iptv_14_plex_clients:
+    displayName: Plex Tuner Allowed IPs
+    description: "Required when the tuner is enabled. Comma-separated IP addresses of trusted Plex/Emby servers, e.g. 192.168.178.30. These peers can read channels/EPG and play tuner streams without a token. No hostnames, wildcards or CIDR. Use direct LAN connections; forwarded proxy headers are ignored. Stop/start after changes."
+    type: STRING
+  guide_05_navbar_button:
+    displayName: Show Navbar Button
+    description: "Show the channel-management button in the Stash navigation bar. Channel management is always reachable at #tvguide."
+    type: BOOLEAN
+  guide_07_min_scenes:
+    displayName: Minimum Scenes Per Channel
+    description: "Sources with fewer scenes than this are not turned into channels. Default 5."
+    type: NUMBER
+  guide_09_pool_cap:
+    displayName: Scenes Per Channel
+    description: "Maximum scenes in a channel's daily rotation. Larger catalogs rotate through different batches each day. Lower values load faster. Default 100."
+    type: NUMBER
+  guide_10_new_release_days:
+    displayName: New Release Window (days)
+    description: "Include scenes whose release date is within this many days. Default 30."
+    type: NUMBER
+  guide_11_recently_added_days:
+    displayName: Recently Added Window (days)
+    description: "Include scenes added to Stash within this many days. Default 14."
+    type: NUMBER
+  guide_12_movie_min_minutes:
+    displayName: Movie Minimum Length (minutes)
+    description: "Scenes longer than this are included in the Movies channel. Default 90."
+    type: NUMBER
+  guide_13_short_max_minutes:
+    displayName: Short Maximum Length (minutes)
+    description: "Scenes shorter than this are included in the Shorts channel. Default 5."
+    type: NUMBER

@@ -1,108 +1,36 @@
-# CLAUDE.md
+# StashIP-TV development
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This repository contains only `plugins/StashIP-TV`. GalleryMode, SpriteTab and
+TheaterMode have been removed. Preserve the original AGPL license and notices.
 
-## Project Overview
+Build in `plugins/StashIP-TV`: `npm ci`, `npm run build`.
+Run `npm test -- --runInBand --silent` and `npm run test:iptv`.
+Set `FFMPEG_TEST_PATH` to run the real-media tests; CI does so on Windows/Ubuntu.
+Build/check an installable archive from the root with
+`python tools/package_stashiptv.py --output-dir dist --revision local --check`.
 
-This is a Stash plugin repository containing plugins for the Stash media server: **SpriteTab** (sprite sheet viewer tab), **TheaterMode**, **GalleryMode**, and **TVGuide** (a live cable-style channel guide).
+Keep package inclusion explicit. Never ship node_modules, development fixtures,
+or extra plugin YAML files. Stash scans all YAML files as potential manifests.
 
-## Commands
+The visible name is StashIP-TV, but the technical ID `TVGuide`, manifest name
+`TVGuide.yml`, `configuration.plugins.TVGuide`, `tvguide_state` and its keys,
+legacy environment variables, stream/channel IDs and daemon state directory
+are compatibility boundaries. Do not rename them or change the tuner identity
+seed without an explicit migration strategy. An ordinary update must retain all
+channels, names, saved filters, credentials and connected client mappings.
 
-All commands run from `plugins/SpriteTab/`:
+Use `node` from the Stash process PATH in the manifest. Node and FFmpeg must be
+available to the same runtime/account as Stash. No Linux-only executable path in
+the shared plugin manifest; document service PATH and Windows executable paths.
 
-```bash
-npm test              # Run Jest test suite
-npm test:watch        # Run Jest in watch mode
-npm test:coverage     # Run tests with coverage report
-STASH_PLUGIN_DIR=/path/to/stash/plugins/SpriteTab npm run sync  # Sync plugin to Stash
-```
+Do not restore the browser player/grid entry point. Shared domain/state modules
+and existing tests remain because IPTV and channel management depend on them.
 
-Build the plugin index (from repo root):
-```bash
-./build_site.sh       # Generates index.yml and plugin zips
-```
+TVGuide's original per-directory coverage thresholds remain: src/domain and
+src/state have 100% statements/lines/functions and 90% branches; src/api and
+src/ui have 80% statements/lines/functions and 70% branches. Tests must verify
+behaviour, persistence, protocol compatibility, lifecycle and credential isolation.
 
-`npm run sync` performs a **clean install**: it removes the destination directory entirely before copying, so stale files from previous versions don't accumulate.
-
-`build_site.sh` uses an **inclusion approach** for zipping: only `.yml`, `.js`, `.css`, `.py`, and `.sh` files at the plugin root level (no recursion, `*.config.js` excluded). Do not change this to `zip -r` without exclusions — Stash scans all `.yml` files in the plugin directory and will log errors for any it cannot parse as a plugin manifest. `node_modules` must never be present in a deployed plugin.
-
-`build_site.sh` also **runs `npm ci && npm run build` for any plugin whose `package.json` declares a `build` script** (currently only TVGuide), before zipping. Two things follow from this:
-
-- Manifest discovery **must** keep pruning `node_modules` — the build step creates it mid-run, and without the prune those hundreds of dependency `.yml` files would be picked up as plugins on the very same run.
-- Bundled plugins gitignore their build output, so a plugin directory in git may contain no shippable `.js` at all until the build runs.
-
-## Test Coverage Requirements
-
-Tests require 100% coverage for functions, lines, and statements, with 80% branch coverage. The test suite uses jsdom for DOM simulation.
-
-**TVGuide sets thresholds per directory instead**, because driving a UI-heavy plugin to 100% in jsdom buys assertions about DOM trivia rather than behaviour: `src/domain/` and `src/state/` are held to 100% statements/lines/functions and **90%** branches (stricter than the repo default, and where all the real logic lives), while `src/api/` and `src/ui/` are held to 80% / 70% branches.
-
-## Architecture
-
-**Core separation pattern**: Pure utilities live in `core.js`, exposed at `window.SpriteTabCore` in the browser and via `module.exports` for Jest. `sprites.js` destructures what it needs from `SpriteTabCore` at the top of its IIFE — there is one shared implementation, not parallel copies. The yml loads `core.js` before `sprites.js` so the global is in place when `sprites.js` runs; reordering breaks the destructure.
-
-### plugins/TVGuide/
-
-The only bundled plugin: ES modules under `src/`, built by esbuild into root-level `tvguide.js` + `tvguide.css`. It deliberately does **not** follow SpriteTab's `window.*` globals pattern — it is far too large for it.
-
-Layered, one-way data flow: `api/` (GraphQL) → `domain/` (pure: scheduling, layout maths, lineup, channel providers) → `state/` (store + reducer + selectors + effects) → `ui/` (overlay, grid, list, viewer). Events go to the reducer; the reducer returns new state **plus effects**; effects perform I/O and dispatch more events. This is GalleryMode's `createStore({ runEffect, ctx })` architecture, minus the hand-duplication that a bundler removes.
-
-Non-obvious invariants:
-
-- **The schedule is a pure function of (channelId, scene pool, day)** — `seededShuffle` seeded by `channelId|YYYY-MM-DD`, cursor `(now - local_midnight) % totalRuntime`. Nothing is persisted. This is what makes a reload keep playing the same programme at an advanced offset. Seed and cursor both pivot on local midnight so they roll over together; changing one without the other makes the day jump mid-programme.
-- **Scene pools must be fetched `sort: "id", direction: ASC`.** The schedule is a seeded shuffle of the pool, so an unstable pool order destroys the illusion.
-- **Channel ids are source-prefixed** (`studio:12`, `tag:12`) because they double as schedule seeds and must not collide across sources.
-- **`SavedFilter.object_filter` is NOT a `SceneFilterType`** despite looking like one. It uses the Stash *UI's* criterion shape (`value: {items:[{id}], excluded, depth}`); forwarding it raw fails with "cannot use map as ID". `src/domain/savedFilterCriteria.js` converts it.
-- **The `?start=` seek fallback shifts the stream's timeline.** Once it engages, the stream's `t=0` is the seek offset, so `streamBaseSeconds` must be subtracted from any comparison of `currentTime` against schedule time — otherwise drift correction re-seeks in a loop.
-- **The grid restyles on tick and only rebuilds on pan/pool/day change** (`track.dataset.signature`). Rebuilding every second would churn the DOM and throw away keyboard focus.
-- **DOM focus is only adopted when focus is already inside the grid**, so a background re-render cannot steal focus from another control.
-- **The grid's row rebuild is keyed on id + name + badge, not id alone.** A rename or custom logo changes neither the id list nor the block set, so keying on ids left the old name on screen.
-- **The visible channel list is state, not a selector.** `state.allChannels` is the raw resolved lineup; `state.channels` is the prefs-applied, sorted list, recomputed whenever channels/prefs/sort change. It has to be real state because `MOVE_FOCUS` walks it inside the reducer — derive it at render time and arrow-down lands on the wrong row.
-- **Lineup and prefs are stored separately on purpose.** `tvguide_lineup` says which channels exist; `tvguide_channel_prefs` (keyed by channel id) says how they are presented. Keeping prefs out of the lineup is what lets a rename survive toggling a lineup rule off and on.
-- **Removing a rule-swept channel freezes the rest into explicit picks.** Otherwise the next resolve sweeps it straight back in and the button looks broken.
-- **The now-line lives in a track overlay** (`left: var(--tvguide-head-width); right: 0`), so its `left: %` is a percentage of the track. Positioning it against the whole scroll container and adding a margin — as it once did — puts it progressively too far right and eventually off-screen.
-- **Not every source is hierarchical.** `SceneFilterType.performers` is a `MultiCriterionInput` with no `depth`, unlike studios/tags/groups; `createEntityProvider` takes a `hierarchical` flag for this. Sending `depth` to performers is rejected by the server.
-- **The guide is always grouped by type**, so there is no "sort by source" mode. `state.channels` is the flattened, collapse-aware visible order that `MOVE_FOCUS` walks; `state.channelGroups` is what renders.
-- **Pins are an ordered array** (`tvguide_pin_order`), not a `pinnedAt` timestamp — a timestamp cannot express a manual drag order. Legacy `pinnedAt` prefs migrate on first load.
-- **The keyboard handler captures and stops propagation**, so controls that interpret arrow keys themselves (the column resizer, sliders) must be covered by `handlesOwnKeys` in `src/ui/keyboard.js` or they never receive them.
-- **`body { overflow: hidden }` does not lock scrolling in iOS Safari.** The overlay pins the body with `position: fixed` and restores `window.scrollY` on close.
-- **Hover focus must survive `adoptFocus`.** Hovering a block records `source: 'hover'`, which is what the mouse-leave revert keys on — but the grid then focuses that block itself, and the block's own `onfocus` would rewrite the source to `'keyboard'`. A `programmaticFocus` flag suppresses that one dispatch. Without it the detail bar sticks on the last scene the mouse passed over.
-- **Nothing in the grid may call `scrollIntoView`, or `focus()` without `preventScroll`.** Both scroll *every* ancestor scroll container, and in theater mode the overlay itself is one — so a letter jump dragged the player off the top of the screen, and the per-second focus re-adoption undid the jump a tick after it happened. `scrollTo(element, block)` sets `scrollTop` on the grid's own scroller instead.
-- **`withVisibleChannels` tests the tuned channel against `allChannels`, not the visible list.** Collapsing a group, searching, or filtering by type only changes what is *drawn*; retuning because a row stopped being shown is not something any of those asked for. Hiding a channel through prefs is different and does still retune, which is why the predicate also checks `prefs[id].hidden`.
-- **`hasChannels` is about `allChannels`.** Keyed on the visible list, "No channels. Lower the minimum scene count" appeared whenever every group was collapsed. `isFilteredEmpty` is the separate, narrower signal that a search or type filter matched nothing.
-- **`state.managerSort` is dialog-only.** The guide is always alphabetical, which is what makes the per-group A-Z rails mean anything. The manager's sort orders `catalogRows` and nothing else.
-- **The A-Z rail belongs to the group under the scroll position**, tracked in a grid-local variable off a `scroll` listener. Putting it in the store would re-render the whole grid on every scroll frame.
-- **`setIcon` is idempotent, and that is load-bearing.** The player's controls live inside the element that goes fullscreen and `render` runs every second; recreating an SVG in the fullscreen subtree once a tick is the churn that drops the browser out of fullscreen. Commit `0069b96` moved the fullscreen target off the churning progress readout and onto `stage` — but `controls` is inside `stage`.
-- **`playerMode` is persisted but `'fullscreen'` is never restored.** Nothing can re-enter the Fullscreen API without a user gesture, so remembering it leaves the state claiming a mode the browser is not in — after which the button toggles the wrong way on its first press.
-- **Fullscreen targets the stage, and prefers `webkitRequestFullscreen` to the video's own `webkitEnterFullscreen`.** Native *video* fullscreen ends the moment the element's `src` changes, and the viewer reloads the stream whenever a seek fails to take — which is why iPad dropped out a beat after opening. The video path is the last resort, for iPhone. Safari also fires only `webkitfullscreenchange`, and the video path fires neither — it reports through `webkitendfullscreen`.
-- **Clicking a programme that is not on pins its details and touches nothing else.** There is no preview state, no still, and no "Back to live": stopping the stream to show a poster meant reading through the schedule killed what you were watching. `FOCUS_LIVE` keys on `source === 'sticky'` to leave a pinned programme alone.
-- **The badge in a guide row tunes; the badge in the scene details links to Stash.** Pressing a channel in a guide means "put this on", so `openSource` moved to the banner, where the channel it opens is the one being described.
-- **`typeFilter` can be `'pinned'`**, which selects on `pinOrder` rather than on `channel.source`. Pinned is a group in the guide, so it is a chip in the toolbar like the rest.
-- **A letter jump scrolls to `'start'`, less the sticky group header.** Centring it left a screenful of the previous letter above the channel asked for — click T, see two S channels.
-- **The header's height is derived from `--tvguide-player-width`**, so the resizable player drives one number and the picture keeps its 16:9 shape. The variable lives on the overlay root, not the player: custom properties only inherit downwards, and the header is the player's parent.
-
-### plugins/SpriteTab/
-
-- **sprites.js** - Main plugin entry point. Handles DOM rendering, event listeners, GraphQL queries to Stash API, and plugin lifecycle. Contains configuration constants and initialization logic with race condition prevention. Consumes pure utilities from `window.SpriteTabCore` rather than reimplementing them.
-
-- **core.js** - Shared pure utilities, loaded before `sprites.js` per the manifest. Time formatting, settings (localStorage), tooltip positioning with viewport bounds, sprite grid + VTT cue parsing, active-sprite index calculation, URL/GraphQL parsing helpers, mobile layout detection. Wrapped in an IIFE that publishes its API to `window.SpriteTabCore` (browser) and `module.exports` (Jest).
-
-- **SpriteTab.yml** - Plugin manifest defining metadata and user-configurable settings: `tooltip_enabled`, `tooltip_width`, `show_timestamps`, `compact_view`, `auto_scroll`, `grid_columns`.
-
-- **__tests__/** - Jest tests split into unit tests (core.test.js) and integration tests (integration.test.js) for DOM interactions.
-
-## Key Patterns
-
-- Plugin uses localStorage for client-side user preferences
-- GraphQL queries communicate with Stash server API
-- Touch-aware event handling filters synthetic mouse events
-- Tooltip positioning algorithm prevents viewport overflow
-
-## Mobile Touch Handling
-
-Several non-obvious invariants must be preserved:
-
-- **`lastTouchTime` is shared across all sprite cells** (declared once before the cell loop, not inside it). Per-cell timestamps would fail to block synthetic `mouseenter` events fired on neighbouring cells after a finger lift.
-- **`isLongPress` gates scroll detection in `ontouchmove`**: when a long press is active the handler returns early, before any scroll-detection code runs. This allows the tooltip to follow the finger across cells. Do not move the scroll-detection block above the `isLongPress` check.
-- **Mobile layout is detected via media query** (`window.matchMedia('(max-width: 767px)')`), not by touch capability. Tablets may have their own scroll containers and should behave like desktop. `isMobileLayout()` in `core.js` accepts an injectable `matchMediaFn` for testability.
-- **Auto-scroll during playback is suppressed on mobile** to avoid hijacking the page scroll. On mobile, tapping a sprite seeks the video and (if auto-scroll is enabled) scrolls the player back into view instead.
+The release workflow tests Ubuntu/Windows on Node 20/22/24, then publishes only
+from main to the stable `tvguide-iptv` branch. The index ID remains TVGuide while
+the name/archive are StashIP-TV. No GitHub Pages deployment is required.

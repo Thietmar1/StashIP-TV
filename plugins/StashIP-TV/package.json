@@ -1,0 +1,26 @@
+{
+  "name": "staship-tv",
+  "version": "1.4.0",
+  "description": "Custom live channels for Jellyfin, Stashy, Plex and Emby",
+  "private": true,
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "watch": "node esbuild.config.mjs --watch",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:iptv": "node esbuild.config.mjs && node iptv/test/run.cjs",
+    "start:iptv": "node tvguide-server.js",
+    "sync": "test -n \"$STASH_PLUGIN_DIR\" || (echo 'Error: STASH_PLUGIN_DIR not set' && exit 1) && npm run build && rm -rf \"$STASH_PLUGIN_DIR\" && mkdir -p \"$STASH_PLUGIN_DIR\" && cp tvguide.js tvguide.css tvguide-server.js TVGuide.yml README.md IPTV.md NATIVE-APPS.md PLEX-EMBY.md THIRD-PARTY-NOTICES.txt stashiptv.service \"$STASH_PLUGIN_DIR/\""
+  },
+  "devDependencies": {
+    "@babel/preset-env": "^7.26.0",
+    "babel-jest": "^29.7.0",
+    "esbuild": "^0.24.0",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0"
+  },
+  "dependencies": {
+    "graphql": "16.11.0"
+  }
+}
