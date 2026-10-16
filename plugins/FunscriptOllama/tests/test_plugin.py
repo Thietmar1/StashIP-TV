@@ -1,4 +1,5 @@
 import copy
+from concurrent.futures import ThreadPoolExecutor
 import importlib.util
 import json
 import math
@@ -8,7 +9,6 @@ import tempfile
 import subprocess
 import sys
 import threading
-import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
@@ -101,7 +101,8 @@ class ConfigTests(unittest.TestCase):
 class OllamaTests(unittest.TestCase):
     def setUp(self):
         self.calls, self.reply, self.status = [], {"done": True, "message": {"content": json.dumps(REGION)}}, 200
-        self.delay = 0
+        self.response_gate = None
+        self.response_waiting = threading.Event()
         self.replies = []
         owner = self
 
@@ -130,7 +131,10 @@ class OllamaTests(unittest.TestCase):
                     self.end_headers()
                     self.wfile.write(json.dumps({"data": data}).encode())
                     return
-                time.sleep(owner.delay)
+                if owner.response_gate is not None:
+                    owner.response_waiting.set()
+                    if not owner.response_gate.wait(timeout=10):
+                        raise TimeoutError("Test did not release the Ollama response")
                 reply = owner.replies.pop(0) if owner.replies and self.path == "/api/chat" else owner.reply
                 self.send_response(owner.status)
                 self.send_header("Content-Type", "application/json")
@@ -146,6 +150,8 @@ class OllamaTests(unittest.TestCase):
         self.client = plugin.Ollama(self.settings)
 
     def tearDown(self):
+        if self.response_gate is not None:
+            self.response_gate.set()
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=3)
@@ -169,12 +175,19 @@ class OllamaTests(unittest.TestCase):
                 self.client.region([np.zeros((32, 32, 3), np.uint8)])
 
     def test_waits_for_delayed_response_and_logs_wait_without_retry(self):
-        self.delay = 0.15
+        self.response_gate = threading.Event()
         log = FakeLog()
         client = plugin.Ollama(self.settings, log)
-        started = time.monotonic()
-        self.assertTrue(client.region([np.zeros((32, 32, 3), np.uint8)])["active"])
-        self.assertGreaterEqual(time.monotonic()-started, self.delay)
+        # Hold a real HTTP response until the request is in flight. This checks
+        # waiting without depending on Windows/Python timer resolution.
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            pending = executor.submit(client.region, [np.zeros((32, 32, 3), np.uint8)])
+            try:
+                self.assertTrue(self.response_waiting.wait(timeout=5), "Ollama request never arrived")
+                self.assertFalse(pending.done(), "Client returned before the response was released")
+            finally:
+                self.response_gate.set()
+            self.assertTrue(pending.result(timeout=5)["active"])
         self.assertEqual([p for p, _ in self.calls], ["/api/chat"])
         self.assertIn("10800 seconds", log.messages[0])
         self.assertTrue(any("answered after" in message for message in log.messages))
