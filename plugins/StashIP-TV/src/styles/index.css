@@ -781,6 +781,8 @@ body.stash-tvguide-active {
 }
 
 .tvguide-manager-sort,
+.tvguide-manager-source,
+.tvguide-manager-view,
 .tvguide-manager-threshold,
 .tvguide-manager-editor input {
     padding: 5px 8px;

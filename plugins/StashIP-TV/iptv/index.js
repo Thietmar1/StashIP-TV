@@ -12,6 +12,7 @@ export * from './stashy.js';
 export * from './hls.js';
 export * from './tuner.js';
 export * from './tunerAccess.js';
+export * from './appDashboard.js';
 
 // esbuild emits this entry as CommonJS. Importing it in tests never listens.
 if (require.main === module) {

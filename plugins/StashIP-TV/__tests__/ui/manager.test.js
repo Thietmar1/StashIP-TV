@@ -64,6 +64,31 @@ const buttonLabelled = (root, pattern) =>
         pattern.test(b.getAttribute('aria-label') || '')
     );
 
+describe('active channel view', () => {
+    it('shows only selected non-hidden channels and allows hidden channels to be recovered', () => {
+        const { store, manager } = mount({ managerView: 'active', prefs: { 'studio:2': { hidden: true } } });
+        expect(rowFor(manager, 'studio:1')).not.toBeNull();
+        expect(rowFor(manager, 'studio:2')).toBeNull();
+        expect(rowFor(manager, 'studio:3')).toBeNull();
+        expect(manager.element.querySelector('.tvguide-manager-load-more')).toBeNull();
+        const view = manager.element.querySelector('.tvguide-manager-view');
+        view.value = 'selected';
+        view.dispatchEvent(new Event('change'));
+        expect(store.getState().managerView).toBe('selected');
+        expect(rowFor(manager, 'studio:2')).not.toBeNull();
+        buttonLabelled(rowFor(manager, 'studio:2'), /^Show /).click();
+        view.value = 'active'; view.dispatchEvent(new Event('change'));
+        expect(rowFor(manager, 'studio:2')).not.toBeNull();
+    });
+
+    it('removing one rule-selected channel retains selected channels outside a catalogue page', () => {
+        const { store, manager } = mount({ managerView: 'active', allChannels: [chan('studio:1', 'Alpha'), chan('studio:999', 'Last page')] });
+        buttonLabelled(rowFor(manager, 'studio:1'), /^Remove from guide$/).click();
+        expect(store.getState().lineup).toEqual([{ source: 'studio', ids: ['999'] }]);
+        expect(store.getState().allChannels.map((c) => c.id)).toEqual(['studio:999']);
+    });
+});
+
 beforeEach(() => {
     document.body.innerHTML = '';
 });

@@ -244,16 +244,21 @@ export function lineupRule(state, source) {
  */
 export function catalogRows(state, source = state.managerSource) {
     const paged = catalogPage(state, source);
-    const isPaged = paged.loadedPages.length > 0;
-    const rows = isPaged ? paged.channels : (state.catalog?.[source] || []);
+    const selectedOnly = state.managerView === 'active' || state.managerView === 'selected';
+    const isPaged = !selectedOnly && paged.loadedPages.length > 0;
+    const rows = selectedOnly
+        ? state.allChannels.filter((channel) => channel.source === source && (state.managerView !== 'active' || !state.prefs[channel.id]?.hidden))
+        : isPaged ? paged.channels : (state.catalog?.[source] || []);
     const query = state.managerSearch.trim().toLowerCase();
-    const filtered = !isPaged && query ? rows.filter((channel) => channel.name.toLowerCase().includes(query)) : rows;
+    const filtered = !isPaged && query ? rows.filter((channel) =>
+        channel.name.toLowerCase().includes(query) || (state.prefs[channel.id]?.name || '').toLowerCase().includes(query)) : rows;
 
     // Paged entity catalogues arrive in server order. Sorting a partial page
     // locally would make a high-count item on a later page look incorrectly
     // ranked, so only the legacy in-memory path is sorted here.
     const compare = COMPARATORS[state.managerSort] || COMPARATORS[DEFAULT_SORT];
-    const sorted = isPaged ? filtered : filtered.slice().sort(compare);
+    const sorted = isPaged ? filtered : filtered.slice().sort((a, b) => compare(
+        { ...a, name: state.prefs[a.id]?.name || a.name }, { ...b, name: state.prefs[b.id]?.name || b.name }));
 
     const live = new Set(state.allChannels.map((c) => c.id));
 

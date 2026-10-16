@@ -4,7 +4,7 @@ const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 const { once } = require('node:events');
 const { buildSchema, introspectionFromSchema } = require('graphql');
-const { createIptvServer, readConfig, adapterSceneId } = require('../../tvguide-server.js');
+const { createIptvServer, readConfig, adapterSceneId, dashboardFilters, channelFilterId } = require('../../tvguide-server.js');
 const fixture = (name) => readFileSync(join(__dirname, 'fixtures/stashy', name), 'utf8');
 const schema = buildSchema(readFileSync(join(__dirname, 'fixtures/adapter-schema.graphql'), 'utf8'));
 const config = readConfig({ TVGUIDE_TOKEN: 'stashy-test-token-'.repeat(3), STASH_API_KEY: 'private-real-stash-key', STASH_URL: 'http://stash:9999', TVGUIDE_PUBLIC_URL: 'http://tvguide:9898', TVGUIDE_STASHY_ENABLED: 'true' });
@@ -90,6 +90,51 @@ test('live title refresh keeps IDs stable and supports query aliases, pagination
     assert.deepEqual(secondPage.data.live.scenes, []);
     const filtered = await (await request(query, { scene_filter: { organized: false } })).json();
     assert.equal(filtered.data.live.count, 0);
+});
+
+test('native dashboard filters select live channels across programme changes without browser JavaScript', async (t) => {
+    const { request, clock, calls } = await setup(t);
+    const response = await (await request(fixture('findSavedFilters.graphql'))).json();
+    assert.equal(response.errors, undefined, JSON.stringify(response.errors));
+    const filters = response.data.findSavedFilters;
+    assert.equal(filters.length, 2); // all live + one playing channel; empty channel omitted
+    const single = filters.find((filter) => filter.id !== '1');
+    assert.equal(single.name, '12 · My Channel');
+    assert.equal(single.mode, 'SCENES');
+    assert.deepEqual(single.object_filter, { code: { value: 'tag:7', modifier: 'EQUALS' } });
+    assert.equal(JSON.parse(single.filter).c[0].id, 'code');
+    const listQuery = fixture('findScenes.graphql') + fixture('fragment_SceneListFields.graphql');
+    const first = await (await request(listQuery, { scene_filter: single.object_filter, filter: { per_page: 10, sort: 'date', direction: 'DESC' } })).json();
+    assert.equal(first.errors, undefined, JSON.stringify(first.errors));
+    assert.equal(first.data.findScenes.count, 1);
+    const scene = first.data.findScenes.scenes[0];
+    assert.match(scene.title, /Current Scene/);
+    assert.match(scene.paths.stream, /stream\.m3u8/);
+    clock(Date.UTC(2026, 9, 16, 11));
+    const next = await (await request(listQuery, { scene_filter: single.object_filter })).json();
+    assert.equal(next.data.findScenes.scenes[0].id, scene.id);
+    assert.match(next.data.findScenes.scenes[0].title, /Next Scene/);
+    const configResult = await (await request('{ configuration { ui } findSavedFilter(id:"1") { name object_filter } findSavedFilters(mode:IMAGES) { id } }')).json();
+    assert.equal(configResult.errors, undefined, JSON.stringify(configResult.errors));
+    assert.deepEqual(configResult.data.configuration.ui.frontPageContent, [{ __typename: 'SavedFilter', savedFilterId: 1 }]);
+    assert.equal(configResult.data.findSavedFilter.name, 'StashIP-TV Live');
+    assert.deepEqual(configResult.data.findSavedFilters, []);
+    assert.equal((await (await request('{ findSavedFilter(id:"missing") { id } }')).json()).data.findSavedFilter, null);
+    assert.deepEqual(calls, []);
+    assert.ok(!JSON.stringify(response).includes(config.apiKey));
+    assert.ok(!JSON.stringify(configResult).includes(config.token));
+});
+
+test('native filter identities use channel IDs and survive duplicate names, renaming and numbering changes', () => {
+    const scenes = ['tag:7', 'studio:9'].map((code) => ({ code, custom_fields: { tvguide_number: 12, tvguide_channel: 'Same name' } }));
+    const before = dashboardFilters(scenes);
+    scenes[0].custom_fields = { tvguide_number: 99, tvguide_channel: 'Renamed' };
+    const after = dashboardFilters(scenes);
+    assert.equal(before[1].id, after[1].id);
+    assert.notEqual(before[1].id, before[2].id);
+    assert.notEqual(channelFilterId('tag:7'), '1');
+    assert.equal(after[1].name, '99 · Renamed');
+    assert.deepEqual(before[1].object_filter, after[1].object_filter);
 });
 
 test('library mutations and unsupported reads never reach the real Stash connection', async (t) => {

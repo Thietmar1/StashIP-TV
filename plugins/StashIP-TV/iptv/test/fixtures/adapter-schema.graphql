@@ -11,7 +11,7 @@ input FindFilterType { page: Int per_page: Int sort: String direction: SortDirec
 input StringCriterionInput { value: String! modifier: CriterionModifier! }
 input IntCriterionInput { value: Int! value2: Int modifier: CriterionModifier! }
 input MultiCriterionInput { value: [ID!] excludes: [ID!] modifier: CriterionModifier! depth: Int }
-input SceneFilterType { title: StringCriterionInput rating100: IntCriterionInput organized: Boolean interactive: Boolean studios: MultiCriterionInput tags: MultiCriterionInput AND: SceneFilterType OR: SceneFilterType NOT: SceneFilterType }
+input SceneFilterType { title: StringCriterionInput code: StringCriterionInput rating100: IntCriterionInput organized: Boolean interactive: Boolean studios: MultiCriterionInput tags: MultiCriterionInput AND: SceneFilterType OR: SceneFilterType NOT: SceneFilterType }
 type VideoFile { id: ID! path: String basename: String format: String width: Int height: Int duration: Float video_codec: String audio_codec: String bit_rate: Int frame_rate: Float size: Int64 created_at: Time updated_at: Time }
 type ScenePathsType { screenshot: String preview: String stream: String webp: String vtt: String sprite: String funscript: String interactive_heatmap: String caption: String }
 type SceneStreamEndpoint { url: String! mime_type: String label: String }
@@ -41,9 +41,10 @@ type IdentifySource { stash_box_endpoint: String stash_box_index: Int }
 type IdentifySourceOptions { source: IdentifySource options: IdentifyOptions }
 type IdentifyDefaults { sources: [IdentifySourceOptions!]! options: IdentifyOptions }
 type DefaultConfig { identify: IdentifyDefaults }
-type ConfigResult { general: GeneralConfig defaults: DefaultConfig plugins: Map }
+type ConfigResult { general: GeneralConfig defaults: DefaultConfig plugins: Map ui: Map }
 type Stats { scene_count: Int! scenes_size: Int64! scenes_duration: Float! image_count: Int! images_size: Int64! gallery_count: Int! performer_count: Int! studio_count: Int! group_count: Int! tag_count: Int! total_o_count: Int! total_play_duration: Float! total_play_count: Int! scenes_played: Int! movie_count: Int! }
-type SavedFilter { id: ID! name: String! mode: FilterMode! object_filter: Map }
+type SavedFindFilterType { sort: String direction: SortDirectionEnum }
+type SavedFilter { id: ID! name: String! mode: FilterMode! object_filter: Map filter: String! find_filter: SavedFindFilterType ui_options: Map }
 type Query {
  version: Version! systemStatus: SystemStatus! configuration: ConfigResult! stats: Stats!
  findScenes(scene_filter: SceneFilterType, filter: FindFilterType, ids: [ID!], scene_ids: [Int!]): FindScenesResultType!
