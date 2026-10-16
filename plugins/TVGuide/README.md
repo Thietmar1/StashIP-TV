@@ -1,6 +1,7 @@
 # TV Guide
 
-Manage live channels from your Stash library and watch them through Jellyfin.
+Manage live channels from your Stash library and watch them through Jellyfin
+or Emby. An optional virtual HDHomeRun tuner prototype also targets Plex.
 An optional read-only adapter prototype presents those channels as virtual
 scenes in Stashy, with both channel and currently playing scene in the title.
 
@@ -18,6 +19,11 @@ sources. Existing lineups are preserved.
 The manager retains channel names, logos, hidden state, pins and pin order,
 scene caps and source selections. State is stored in TVGuide's Stash plugin
 configuration, so it follows the Stash instance across browsers.
+
+Click **Rename** on an included channel, enter its name and **Save name** (or
+press Enter). **Reset name** restores the original. Names apply to M3U, XMLTV,
+Stashy and the Plex tuner; the original Stash entities are unchanged. See
+[Plex/Emby setup and names](PLEX-EMBY.md) for refresh and mapping instructions.
 
 Special channels include **New releases**, **Recently added**, **Movies**,
 **Shorts** and optional **All Scenes**. All Scenes uses a lightweight index and

@@ -402,6 +402,18 @@ export function createManager({ store }) {
                         onclick: () => toggleIncluded(state, source, channel, included)
                     }),
                     included ? [
+                        el('button', {
+                            class: 'tvguide-manager-rename', type: 'button',
+                            'aria-label': 'Rename channel', text: 'Rename',
+                            onclick: () => {
+                                editing.add(channel.id);
+                                renderedSignature = '';
+                                render(store.getState());
+                                root.querySelectorAll('[data-channel-id]').forEach((item) => {
+                                    if (item.dataset.channelId === channel.id) item.querySelector('input[type="text"]')?.focus();
+                                });
+                            }
+                        }),
                         toggleButton({
                             label: pinned ? `Unpin ${channel.name}` : `Pin ${channel.name} to the top`,
                             text: pinned ? '★' : '☆',
@@ -491,13 +503,18 @@ export function createManager({ store }) {
         return el(
             'div',
             { class: 'tvguide-manager-editor' },
-            field(nameId, 'Display name', el('input', {
-                type: 'text',
-                id: nameId,
-                value: pref?.name || '',
-                placeholder: channel.name,
-                onchange: (e) => commit({ name: e.target.value })
-            })),
+            el('form', { class: 'tvguide-manager-name-form', onsubmit: (event) => {
+                event.preventDefault();
+                commit({ name: event.currentTarget.querySelector('input').value });
+            } },
+                field(nameId, 'Channel name', el('input', {
+                    type: 'text', id: nameId, value: pref?.name || '', placeholder: channel.name
+                })),
+                el('button', { type: 'submit', text: 'Save name' }),
+                el('button', { type: 'button', text: 'Reset name', onclick: () => commit({ name: null }) }),
+                el('p', { class: 'tvguide-manager-name-help' },
+                    'Used by Jellyfin, Stashy, Plex and Emby. Leave blank to use the original name.')
+            ),
             field(logoId, 'Logo URL', el('input', {
                 type: 'url',
                 id: logoId,

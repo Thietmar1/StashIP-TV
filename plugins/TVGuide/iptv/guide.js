@@ -116,7 +116,8 @@ export function renderM3u(channels, config) {
     const lines = [`#EXTM3U x-tvg-url="${endpoint(config, '/epg.xml')}"`];
     for (const [index, channel] of channels.entries()) {
         const logo = logoUrl(channel, config);
-        lines.push(`#EXTINF:-1 tvg-id="${m3uText(channel.id)}" tvg-chno="${channelNumber(channel, index, config)}" tvg-name="${m3uText(channel.name)}"${logo ? ` tvg-logo="${m3uText(logo)}"` : ''} group-title="${m3uText(SOURCE_LABELS[channel.source] || 'TVGuide')}",${m3uText(channel.name)}`);
+        const group = m3uText(SOURCE_LABELS[channel.source] || 'TVGuide');
+        lines.push(`#EXTINF:-1 tvg-id="${m3uText(channel.id)}" tvg-chno="${channelNumber(channel, index, config)}" tvg-name="${m3uText(channel.name)}"${logo ? ` tvg-logo="${m3uText(logo)}"` : ''} tvg-group="${group}" group-title="${group}",${m3uText(channel.name)}`);
         lines.push(endpoint(config, `/stream/${encodeURIComponent(channel.id)}.ts`));
     }
     return lines.join('\n') + '\n';
@@ -161,4 +162,3 @@ export async function playableChannels(guide, nowMs) {
     }
     return out;
 }
-

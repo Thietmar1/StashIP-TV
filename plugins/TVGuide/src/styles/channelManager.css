@@ -1,8 +1,11 @@
 .tvguide-manager-shell[hidden] { display: none !important; }
 .tvguide-manager-shell > .tvguide-manager { inset: 12px; }
 .tvguide-manager-shell .tvguide-manager-title::after {
-    content: ' · Jellyfin / Stashy';
+    content: ' · Jellyfin / Stashy / Plex / Emby';
     font-size: .7em;
     font-weight: normal;
     color: var(--tvguide-text-dim);
 }
+.tvguide-manager-name-form { flex: 1 1 100%; min-width: 0; max-width: 100%; }
+.tvguide-manager-name-form button { margin: 6px 8px 0 0; }
+.tvguide-manager-name-help { color: var(--tvguide-text-dim); font-size: .85em; margin: 6px 0; }

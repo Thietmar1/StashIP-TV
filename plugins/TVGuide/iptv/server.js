@@ -6,6 +6,8 @@ import { dayBucket } from '../src/domain/schedule.js';
 import { streamChannel } from './stream.js';
 import { adapterSceneId, createStashyAdapter } from './stashy.js';
 import { createHlsService } from './hls.js';
+import { tunerClientAllowed } from './tunerAccess.js';
+import { tunerDiscovery, tunerDeviceXml, tunerLineup, tunerLineupXml } from './tuner.js';
 
 function authorized(request, url, token, adapter = false) {
     const supplied = (adapter && (request.headers.apikey || url.searchParams.get('apikey'))) ||
@@ -66,7 +68,39 @@ export function createIptvServer(config, { gql = createStashClient(config), load
                 return reply(405, 'Method not allowed\n');
             }
             if (prefix && !url.pathname.startsWith(`${prefix}/`)) return reply(404, 'Not found\n');
-            const path = url.pathname.slice(prefix.length);
+            let path = url.pathname.slice(prefix.length);
+            let tunerAccess = false;
+            if (['/discover.json', '/device.xml', '/lineup_status.json', '/lineup.json', '/lineup.xml', '/lineup.post', '/guide.xml'].includes(path) || /^\/auto\/v\d+$/.test(path)) {
+                if (!config.tunerEnabled) return reply(404, 'Tuner disabled\n');
+                // Plex's HDHomeRun requests have no configurable auth header.
+                // Grant access only to explicitly configured TCP peer IPs.
+                // Forwarded headers are intentionally never trusted here.
+                if (!tunerClientAllowed(request.socket.remoteAddress, config.tunerClients)) return reply(403, 'Tuner client not allowed\n');
+                tunerAccess = true;
+                if (path === '/lineup.post') {
+                    if (request.method !== 'POST') return reply(405, 'POST required\n');
+                    snapshot = null; epg = null;
+                    return reply(200, '');
+                }
+                if (!['GET', 'HEAD'].includes(request.method)) return reply(405, 'GET or HEAD required\n');
+                if (path === '/discover.json') return reply(200, JSON.stringify(tunerDiscovery(config)), 'application/json');
+                if (path === '/device.xml') return reply(200, tunerDeviceXml(config), 'application/xml; charset=utf-8');
+                if (path === '/lineup_status.json') return reply(200, JSON.stringify({ ScanInProgress: 0, ScanPossible: 1, Source: 'Cable', SourceList: ['Cable'] }), 'application/json');
+                if (path === '/lineup.json' || path === '/lineup.xml') {
+                    const guide = await getGuide();
+                    const channels = await playableChannels(guide, now());
+                    return path.endsWith('.json')
+                        ? reply(200, JSON.stringify(tunerLineup(channels, config)), 'application/json')
+                        : reply(200, tunerLineupXml(channels, config), 'application/xml; charset=utf-8');
+                }
+                if (path === '/guide.xml') path = '/epg.xml';
+                else {
+                    const guide = await getGuide();
+                    const tunerChannel = guide.channels.find((channel) => String(channel.number) === path.slice(7));
+                    if (!tunerChannel) return reply(404, 'Unknown channel\n');
+                    path = `/stream/${encodeURIComponent(tunerChannel.id)}.ts`;
+                }
+            }
             if (path.startsWith('/stashy/')) {
                 if (!config.stashyEnabled) return reply(404, 'Adapter disabled\n');
                 if (!authorized(request, url, config.token, true)) return reply(401, 'Unauthorized\n');
@@ -119,7 +153,7 @@ export function createIptvServer(config, { gql = createStashClient(config), load
                 }
                 return reply(404, 'Not found\n');
             }
-            if (!authorized(request, url, config.token)) return reply(401, 'Unauthorized\n');
+            if (!tunerAccess && !authorized(request, url, config.token)) return reply(401, 'Unauthorized\n');
             if (!['GET', 'HEAD'].includes(request.method)) return reply(405, 'GET or HEAD required\n');
             if (path === '/health') return reply(200, 'TVGuide IPTV is running\n');
             if (!['/playlist.m3u', '/epg.xml'].includes(path) && !/^\/(stream|logo)\/[^/]+$/.test(path)) return reply(404, 'Not found\n');

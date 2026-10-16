@@ -1,6 +1,6 @@
 name: TV Guide
-description: Channel management, M3U/XMLTV live streaming for Jellyfin and an optional read-only Stashy adapter.
-version: "1.2.1"
+description: Custom live channels and EPG for Jellyfin/Emby, with optional Stashy and Plex tuner adapters.
+version: "1.3.0"
 url: https://github.com/Thietmar1/hippo-stash-plugins/tree/main/plugins/TVGuide
 interface: raw
 errLog: info
@@ -79,6 +79,14 @@ settings:
     displayName: Enable Stashy Adapter (Prototype)
     description: "Expose a read-only virtual Stash library at IPTV Public URL + /stashy. Add it as a separate server in Stashy, using the IPTV Access Token as its API key. Channel and current scene names are shown. Requires a device playback check on iOS/tvOS. Stop/start the server after changing this."
     type: BOOLEAN
+  iptv_13_plex_tuner:
+    displayName: Enable Plex HDHomeRun Tuner (Prototype)
+    description: "Expose the same channels and XMLTV guide to Plex as a virtual tuner. Off by default. Requires Plex Tuner Allowed IPs. Add IPTV Public URL manually in Plex Live TV & DVR; no multicast discovery. Stop/start after changes. Emby can use the existing M3U/XMLTV URLs directly."
+    type: BOOLEAN
+  iptv_14_plex_clients:
+    displayName: Plex Tuner Allowed IPs
+    description: "Required when the tuner is enabled. Comma-separated IP addresses of trusted Plex/Emby servers, e.g. 192.168.178.30. These peers can read channels/EPG and play tuner streams without a token. No hostnames, wildcards or CIDR. Use direct LAN connections; forwarded proxy headers are ignored. Stop/start after changes."
+    type: STRING
   guide_05_navbar_button:
     displayName: Show Navbar Button
     description: "Show the channel-management button in the Stash navigation bar. Channel management is always reachable at #tvguide."

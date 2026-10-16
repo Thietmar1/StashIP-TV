@@ -55,6 +55,35 @@ describe('channel-management-only browser entry', () => {
         expect(config().tvguide_state.unknown_state).toBe('keep too');
     });
 
+    it('offers an explicit rename action, saves it without changing the source and resets to the source name', async () => {
+        const { gql, config } = client();
+        app = startChannelManager({ gql });
+        await app.ready; await flush();
+        app.open(); await flush();
+        let row = app.element.querySelector('[data-channel-id="studio:1"]');
+        row.querySelector('.tvguide-manager-rename').click();
+        let form = row.querySelector('form');
+        // Opening the editor rebuilds the catalogue rows.
+        row = app.element.querySelector('[data-channel-id="studio:1"]');
+        form = row.querySelector('form');
+        const input = form.querySelector('input');
+        expect(document.activeElement).toBe(input);
+        input.value = '  My live channel & more  ';
+        expect(config().tvguide_state.tvguide_channel_prefs).not.toContain('live channel');
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        await flush();
+        expect(JSON.parse(config().tvguide_state.tvguide_channel_prefs)['studio:1'].name).toBe('My live channel & more');
+        expect(app.store.getState().allChannels[0].name).toBe('Studio One');
+        expect(JSON.parse(config().tvguide_state.tvguide_lineup)).toEqual([{ source: 'studio', ids: ['1'] }]);
+        expect(config().iptv_04_token).toBe('keep-private-token');
+        row = app.element.querySelector('[data-channel-id="studio:1"]');
+        expect(row.querySelector('.tvguide-manager-row-name').textContent).toBe('My live channel & more');
+        [...row.querySelectorAll('button')].find((button) => button.textContent === 'Reset name').click();
+        await flush();
+        expect(app.element.querySelector('[data-channel-id="studio:1"] .tvguide-manager-row-name').textContent).toBe('Studio One');
+        expect(JSON.parse(config().tvguide_state.tvguide_channel_prefs)['studio:1']).toBeUndefined();
+    });
+
     it('does not resurrect the browser UI when destroyed during settings loading', async () => {
         let resolve;
         const pending = new Promise((done) => { resolve = done; });

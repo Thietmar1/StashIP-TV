@@ -35,6 +35,18 @@ test('Stashy adapter must be explicitly enabled in plugin settings', async () =>
     }
 });
 
+test('Plex tuner settings require explicit enablement and trusted server IPs', async () => {
+    const configured = (values) => pluginConfig({}, { client: () => async () => ({ configuration: {
+        plugins: { TVGuide: { ...settings, ...values } }, general: {}
+    } }) });
+    assert.equal((await configured({})).tunerEnabled, false);
+    assert.equal((await configured({ iptv_13_plex_tuner: 'true' })).tunerEnabled, false);
+    await assert.rejects(configured({ iptv_13_plex_tuner: true }), /Allowed IPs/);
+    const config = await configured({ iptv_13_plex_tuner: true, iptv_14_plex_clients: '192.168.178.30,192.168.178.31' });
+    assert.equal(config.tunerEnabled, true);
+    assert.deepEqual(config.tunerClients, ['192.168.178.30', '192.168.178.31']);
+});
+
 test('session-cookie auth is used only when an API key is absent', async () => {
     for (const apiKey of ['', 'key']) {
         let headers;

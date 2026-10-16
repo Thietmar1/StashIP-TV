@@ -8,7 +8,7 @@ import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 FILES = ['TVGuide.yml', 'tvguide.js', 'tvguide.css', 'tvguide-server.js',
-         'IPTV.md', 'NATIVE-APPS.md', 'THIRD-PARTY-NOTICES.txt', 'tvguide-iptv.service']
+         'IPTV.md', 'NATIVE-APPS.md', 'PLEX-EMBY.md', 'THIRD-PARTY-NOTICES.txt', 'tvguide-iptv.service']
 
 
 def package(output_dir, revision):
@@ -28,7 +28,7 @@ def package(output_dir, revision):
         f'- id: TVGuide\n'
         f'  name: TV Guide\n'
         f'  metadata:\n'
-        f'    description: TVGuide channel management, Jellyfin live TV and optional Stashy adapter.\n'
+        f'    description: Custom TVGuide channels for Jellyfin, Stashy, Plex and Emby.\n'
         f'  version: "{version}-{revision}"\n'
         f'  date: "{date}"\n'
         f'  path: TVGuide.zip\n'
