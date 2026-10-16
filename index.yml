@@ -1,8 +1,8 @@
 - id: TVGuide
   name: TV Guide
   metadata:
-    description: TVGuide channel management, Jellyfin live TV and optional Stashy adapter.
-  version: "1.2.1-9b08c2621641"
-  date: "2026-10-16 03:29:29"
+    description: Custom TVGuide channels for Jellyfin, Stashy, Plex and Emby.
+  version: "1.3.0-19316f66fe19"
+  date: "2026-10-16 03:52:37"
   path: TVGuide.zip
-  sha256: 11e0ebcd18f21086044ca94d19cacb561980d5912487ce1801f31b8ce9c39155
+  sha256: b221e995a09b573feaf4e266751b7d47756074804685123cdf023043b7d434a5
