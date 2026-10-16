@@ -1,8 +1,8 @@
 - id: TVGuide
-  name: TV Guide
+  name: StashIP-TV
   metadata:
-    description: Custom TVGuide channels for Jellyfin, Stashy, Plex and Emby.
-  version: "1.3.0-19316f66fe19"
-  date: "2026-10-16 03:52:37"
-  path: TVGuide.zip
-  sha256: b221e995a09b573feaf4e266751b7d47756074804685123cdf023043b7d434a5
+    description: StashIP-TV live channels and EPG for Jellyfin, Stashy, Plex and Emby.
+  version: "1.4.0-067c6bc1e98d"
+  date: "2026-10-16 12:00:58"
+  path: StashIP-TV.zip
+  sha256: 8ddcd0a27af9bc98f64ad3f2797238c1cd26f3704b52e4218bf406ceb6d2a782
