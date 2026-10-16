@@ -2,7 +2,7 @@
   name: Funscript Ollama
   metadata:
     description: Ollama and Haven motion analysis with VR, extra axes and chapter markers.
-  version: "0.2.0-144ea1e4a661"
-  date: "2026-10-16 15:48:29"
+  version: "0.2.1-5bdbf9e14db6"
+  date: "2026-10-16 16:09:38"
   path: FunscriptOllama.zip
-  sha256: 80831c934bec475163ef6b7e7340fd1fe593eca02947d5c781dc37d3494b2f17
+  sha256: 3d4026b55015c62bdf21a56a150fa57340fad6fcbc1a902c7b3eb334fd05d83b
