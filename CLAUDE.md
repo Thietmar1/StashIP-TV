@@ -4,7 +4,11 @@ This repository contains `plugins/StashIP-TV` and the independent experimental
 `plugins/FunscriptOllama`. GalleryMode, SpriteTab and TheaterMode have been
 removed. Preserve the original AGPL license and notices.
 
-Funscript Ollama uses Python/OpenCV plus native Ollama vision/structured JSON.
+Funscript Ollama uses Python/OpenCV plus native Ollama vision/structured JSON or
+the official Codex/Gemini CLI with account login. Preserve the account-only mode:
+do not extract OAuth tokens, call private backends, silently use API keys, or
+install CLIs at task runtime. CLI subprocesses must have bounded output/time,
+stop descendants on exit/cancellation, and never log raw credential-bearing output.
 Run `python -m unittest discover -s plugins/FunscriptOllama/tests -v` and
 `python tools/package_funscript_ollama.py --output-dir dist/funscript-ollama --revision local --check`.
 Keep the two plugin packages independent. `tools/package_catalog.py` builds the

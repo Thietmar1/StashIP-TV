@@ -1,7 +1,8 @@
 # StashIP-TV
 
 Auch in diesem Repository: **[Funscript Ollama](https://github.com/Thietmar1/StashIP-TV/tree/main/plugins/FunscriptOllama)**,
-ein eigenständiger Prototyp zur Qwen-gestützten Bewegungsanalyse über Ollama.
+ein eigenständiger Prototyp zur Bewegungsanalyse mit Ollama oder optionaler
+ChatGPT-/Gemini-Konto-Anmeldung über die offiziellen CLIs (ohne API-Schlüssel).
 Die bestehende Quelle `tvguide-iptv/index.yml` bietet beide unabhängigen Plugins an.
 Funscript Ollama kombiniert Qwen/Haven-Bewegungsanalyse, VR/POV, Zusatzachsen und
 Funscript-Kapitelmarker; die TV-Funktionen bleiben erhalten.

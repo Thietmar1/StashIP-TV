@@ -2,7 +2,7 @@
 
 Independent implementation inspired by FunscriptHaven's tag-based Stash workflow.
 No model-generated action timestamps, automatic dependency installation or uploads
-other than explicit image requests to the configured Ollama instance.
+other than explicit image requests to the selected AI provider.
 """
 from __future__ import annotations
 
@@ -22,8 +22,10 @@ from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 PLUGIN_ID = "FunscriptOllama"
-VERSION = "0.2.2"
+VERSION = "0.3.0"
 DEFAULTS = {
+    "ai_provider": "ollama", "codex_path": "codex", "gemini_path": "gemini",
+    "codex_model": "", "gemini_model": "", "cli_account_dir": "",
     "ollama_url": "http://192.168.178.16:11434",
     "model": "qwen3-vl:8b-instruct",
     "trigger_tag": "FunscriptOllama_Process",
@@ -99,12 +101,21 @@ def configuration(raw):
     for key in BOOLEANS:
         if type(settings[key]) is not bool:
             raise ValueError(f"{key} must be a boolean")
-    for key, allowed in (("engine", ("ollama", "haven", "ollama_haven")),
+    for key, allowed in (("ai_provider", ("ollama", "chatgpt_cli", "gemini_cli")),
+                         ("engine", ("ollama", "haven", "ollama_haven")),
                          ("vr_layout", ("haven", "sbs", "tb", "mono"))):
         if settings[key] not in allowed:
             raise ValueError(f"{key} must be one of {', '.join(allowed)}")
     if not isinstance(settings["vr_tags"], str):
         raise ValueError("vr_tags must be comma-separated names")
+    for key in ("codex_path", "gemini_path", "codex_model", "gemini_model", "cli_account_dir"):
+        if not isinstance(settings[key], str) or any(c in settings[key] for c in ("\x00", "\r", "\n")):
+            raise ValueError(f"{key} must be a single-line string")
+        settings[key] = settings[key].strip()
+    if not settings["codex_path"] or not settings["gemini_path"]:
+        raise ValueError("CLI executable paths must not be empty")
+    if settings["cli_account_dir"] and not Path(settings["cli_account_dir"]).expanduser().is_absolute():
+        raise ValueError("CLI Account Directory must be an absolute path")
     for key in ("model", "trigger_tag", "complete_tag", "error_tag"):
         if not isinstance(settings[key], str) or not settings[key].strip():
             raise ValueError(f"{key} must be a nonempty string")
@@ -129,6 +140,18 @@ def normalize_url(value):
             path = path[:-len(suffix)]
             break
     return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
+
+
+def vision_client(settings, log):
+    if settings["ai_provider"] == "ollama":
+        return Ollama(settings, log)
+    from cli_vision import CLIVision
+    return CLIVision(settings, log, validate_region, REGION_PROMPT, REGION_SCHEMA)
+
+
+def selected_model(settings):
+    return (settings["model"] if settings["ai_provider"] == "ollama" else
+            settings["codex_model" if settings["ai_provider"] == "chatgpt_cli" else "gemini_model"] or "CLI account default")
 
 
 def validate_region(value):
@@ -491,7 +514,8 @@ def analyze_video(path, settings, ollama, progress=lambda value: None, vr=False,
         if log:
             log.info(f"Step OK: Motion analysis and script validation completed; {len(actions)} actions, {len(regions)} tracking regions")
         return {"version": "1.0", "inverted": False, "range": 100, "actions": actions,
-                "metadata": {"creator": f"Funscript Ollama {VERSION}", "model": settings["model"],
+                "metadata": {"creator": f"Funscript Ollama {VERSION}", "model": selected_model(settings),
+                             "ai_provider": settings["ai_provider"] if settings["engine"] != "haven" else "none",
                              "experimental": True, "engine": settings["engine"],
                              "vr": vr, "regions": regions}}
     finally:
@@ -623,7 +647,8 @@ def import_existing(stash, settings, log, all_scenes=False):
 
 def process_queue(stash, settings, log):
     from chapters import load_script, export_chapters
-    ollama = None if settings["engine"] == "haven" else Ollama(settings, log)
+    from cli_vision import ProviderUnavailableError
+    ollama = None if settings["engine"] == "haven" else vision_client(settings, log)
     if ollama:
         ollama.check_model()
     queue = SceneQueue(stash, settings)
@@ -650,7 +675,7 @@ def process_queue(stash, settings, log):
                 summary["skipped"] += 1
                 log.info(f"Scene {scene['id']}: existing script preserved; queue tag retained")
                 continue
-            log.info(f"Scene {scene['id']}: analyzing video with {settings['engine']} engine")
+            log.info(f"Scene {scene['id']}: analyzing video with {settings['engine']} engine; provider={settings['ai_provider'] if ollama else 'none'}")
             script = analyze_video(path, settings, ollama,
                                    lambda value: log.progress((i+value)/len(scenes)),
                                    vr=vr_scene(scene, settings), log=log)
@@ -674,6 +699,9 @@ def process_queue(stash, settings, log):
                 log.info(f"Scene {scene['id']}: Error status saved; queue tag retained")
             except Exception as tag_exc:
                 log.error(f"Could not update error tag: {tag_exc}")
+            if isinstance(exc, ProviderUnavailableError):
+                log.error("AI provider unavailable; stopping this task. Remaining scenes and queue tags are retained")
+                break
         finally:
             gc.collect()  # Release traceback/worker cycles holding native frame buffers between scenes.
             log.progress((i+1)/len(scenes))
@@ -698,23 +726,26 @@ def run(payload, stash_factory=None, log=None):
         return {"output": "Recommended generation settings applied. Reload plugin settings to see the values."}
     raw = stash.get_configuration(fragment="plugins").get("plugins", {}).get(PLUGIN_ID, {})
     settings = configuration(raw)
-    log.info(f"Step OK: Plugin settings validated; engine={settings['engine']}, Ollama timeout={settings['timeout_seconds']} seconds")
+    log.info(f"Step OK: Plugin settings validated; engine={settings['engine']}, provider={settings['ai_provider']}, AI timeout={settings['timeout_seconds']} seconds")
     if mode in ("import_chapters", "import_all_chapters"):
         summary = import_existing(stash, settings, log, all_scenes=mode == "import_all_chapters")
         return {"output": f"Scanned: {summary['scenes']}; imported markers: {summary['markers']}; failed: {summary['failed']}",
                 "error": "Some chapter imports failed" if summary["failed"] else None}
-    if mode == "test_connection":
+    if mode in ("test_connection", "test_provider"):
         import numpy as np
         import cv2
-        client = Ollama(settings, log)
+        # Keep the legacy Ollama task explicit; the new task tests the selector.
+        test_settings = {**settings, "ai_provider": "ollama"} if mode == "test_connection" else settings
+        client = vision_client(test_settings, log)
         client.check_model()
         a = np.zeros((160, 240, 3), dtype=np.uint8)
         b = a.copy()
         cv2.rectangle(a, (40, 40), (100, 100), (230, 230, 230), -1)
         cv2.rectangle(b, (50, 50), (110, 110), (230, 230, 230), -1)
         client.region([a, b])
-        log.info(f"Ollama image request and JSON validation succeeded: {settings['model']}")
-        return {"output": "Ollama connection and vision request OK"}
+        log.info(f"Step OK: {test_settings['ai_provider']} synthetic image request and region validation completed")
+        return {"output": "Ollama connection and vision request OK" if mode == "test_connection" else
+                f"{settings['ai_provider']} account connection and vision request OK"}
     if mode != "process_scenes":
         raise ValueError(f"Unknown task mode: {mode}")
     result = process_queue(stash, settings, log)
