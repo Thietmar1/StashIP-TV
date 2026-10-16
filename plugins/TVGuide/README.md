@@ -55,7 +55,9 @@ library through this connection is disabled.
 
 Automated tests cover original Stashy GraphQL queries and media routes.
 Playback on an actual iOS/tvOS device still needs verification. Live seeking,
-downloads and Stashy's fallback HLS/MP4 URLs are not supported by this prototype.
+downloads and Stashy's MP4 fallback are not supported by this prototype.
+Version 1.2.1 serves buffered HLS to Stashy, including its HLS fallback URL;
+Jellyfin's MPEG-TS stream is unchanged.
 
 ## Development
 

@@ -121,7 +121,7 @@ export function createStashyAdapter(config, { gql, getGuide, now = Date.now, boo
                 const id = adapterSceneId(channel.id);
                 const title = program.scene.title?.trim() || `Untitled scene ${program.scene.id}`;
                 const stamp = new Date(program.startMs).toISOString();
-                const stream = endpoint(config, `/stream/${encodeURIComponent(channel.id)}.ts`);
+                const stream = endpoint(config, `/stashy/scene/${id}/stream.m3u8`);
                 const screenshot = endpoint(config, `/stashy/scene/${id}/screenshot`);
                 scenes.push({
                     id, title: `${channel.number} · ${channel.name} — ${title}`,
@@ -136,7 +136,7 @@ export function createStashyAdapter(config, { gql, getGuide, now = Date.now, boo
                     files: [{ __typename: 'VideoFile', id: `${id}-live`, path: `TVGuide/${channel.number}.ts`, basename: `${channel.number}.ts`,
                         format: 'mpegts', duration: 0, width: 1280, height: 720, video_codec: 'h264', audio_codec: 'aac', bit_rate: 0, frame_rate: 25, size: 0,
                         created_at: stamp, updated_at: stamp, fingerprints: [] }],
-                    sceneStreams: [{ url: stream, mime_type: 'video/mp2t', label: 'Live' }]
+                    sceneStreams: [{ url: stream, mime_type: 'application/vnd.apple.mpegurl', label: 'Live HLS' }]
                 });
             });
         }

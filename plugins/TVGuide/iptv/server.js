@@ -4,7 +4,8 @@ import { createStashClient, stashMediaUrl, stashHeaders, endpoint, StashRequestE
 import { loadGuide, renderM3u, renderXmltv, playableChannels, nextMidnight, numberChannels } from './guide.js';
 import { dayBucket } from '../src/domain/schedule.js';
 import { streamChannel } from './stream.js';
-import { createStashyAdapter } from './stashy.js';
+import { adapterSceneId, createStashyAdapter } from './stashy.js';
+import { createHlsService } from './hls.js';
 
 function authorized(request, url, token, adapter = false) {
     const supplied = (adapter && (request.headers.apikey || url.searchParams.get('apikey'))) ||
@@ -14,7 +15,7 @@ function authorized(request, url, token, adapter = false) {
     return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export function createIptvServer(config, { gql = createStashClient(config), load = loadGuide, stream = streamChannel, fetchFn = fetch, now = Date.now, log = console.error, adapterBootstrap } = {}) {
+export function createIptvServer(config, { gql = createStashClient(config), load = loadGuide, stream = streamChannel, fetchFn = fetch, now = Date.now, log = console.error, adapterBootstrap, hlsFactory = createHlsService } = {}) {
     let snapshot;
     let expires = 0;
     let active = 0;
@@ -33,6 +34,11 @@ export function createIptvServer(config, { gql = createStashClient(config), load
         return snapshot;
     };
     const stashy = createStashyAdapter(config, { gql, getGuide, now, bootstrap: adapterBootstrap });
+    const hls = hlsFactory(config, {
+        acquire: () => { if (active >= config.maxStreams) return false; active++; return true; },
+        release: () => { active--; }, log,
+        produce: (channelId, response) => stream({ response, config, channelId, getGuide, gql, now })
+    });
 
     const server = createServer(async (request, response) => {
         const reply = (status, text, type = 'text/plain; charset=utf-8') => {
@@ -79,6 +85,20 @@ export function createIptvServer(config, { gql = createStashClient(config), load
                     return reply(200, JSON.stringify(await stashy.request(input)), 'application/json; charset=utf-8');
                 }
                 if (!['GET', 'HEAD'].includes(request.method)) return reply(405, 'GET or HEAD required\n');
+                const live = /^\/stashy\/scene\/([^/]+)\/(stream(?:\.m3u8)?|hls\/([a-f0-9]{24})\/(segment-\d{9}\.ts))$/.exec(path);
+                if (live) {
+                    const id = decodeURIComponent(live[1]);
+                    const guide = await getGuide();
+                    const channel = guide.channels.find((item) => adapterSceneId(item.id) === id);
+                    if (!channel || !await guide.program(channel, now())) return reply(404, 'Unknown or empty channel\n');
+                    if (live[3]) {
+                        const segment = await hls.segment(channel.id, live[3], live[4]);
+                        return segment ? reply(200, segment, 'video/mp2t') : reply(404, 'Segment expired\n');
+                    }
+                    if (request.method === 'HEAD') return reply(200, '', 'application/vnd.apple.mpegurl');
+                    const result = await hls.playlist(channel.id, id);
+                    return reply(result.status, result.body, result.status === 200 ? 'application/vnd.apple.mpegurl' : 'text/plain');
+                }
                 const image = /^\/stashy\/scene\/([^/]+)\/screenshot$/.exec(path);
                 if (image) {
                     const source = await stashy.imageScene(decodeURIComponent(image[1]));
@@ -157,5 +177,6 @@ export function createIptvServer(config, { gql = createStashClient(config), load
             else reply(error instanceof URIError ? 400 : 502, 'TVGuide upstream unavailable\n');
         }
     });
-    return { server, getGuide, close() { server.close(); server.closeAllConnections(); } };
+    server.once('close', () => hls.close());
+    return { server, getGuide, close() { hls.close(); server.close(); server.closeAllConnections(); } };
 }

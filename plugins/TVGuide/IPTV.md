@@ -8,6 +8,8 @@ TVGuide's included IPTV server exposes the Stash guide as live channels:
   programme currently on air at its live offset, then advances to the next one.
 - `/health`: process health (also requires the TVGuide token).
 - `/stashy/graphql`: optional read-only virtual library for Stashy (1.2.0+).
+- `/stashy/scene/<virtual-id>/stream.m3u8`: buffered live HLS for Stashy (1.2.1+),
+  with token-authenticated rolling segments and support for its HLS fallback URL.
 
 The Stash browser now contains **channel management only**. The old browser
 player and programme grid are not included in the browser bundle. Saved lineups,
@@ -126,7 +128,10 @@ systemd. The plugin tasks above are the default installation path.
 Run the server in the **Stash LXC**. Jellyfin can stay in a separate LXC; it only
 needs network access to TCP port 9898 on the Stash LXC. All transcoding happens in
 the companion using software H.264/AAC, at 720p/25 fps. No device passthrough is
-required. Each viewer consumes one FFmpeg process, so allocate CPU accordingly.
+required. Each Jellyfin viewer consumes one encoder. Stashy viewers of the same
+channel share one encoder plus a lightweight HLS remux process; allocate CPU
+accordingly. Its shared HLS producer occupies one stream slot until 45 seconds
+after the last playlist/segment request. See [Stashy details](NATIVE-APPS.md).
 
 Requirements: Node.js 20 or newer and FFmpeg with `libx264` and AAC support.
 Debian's `nodejs` and `ffmpeg` packages provide these. Inside the Stash LXC:
