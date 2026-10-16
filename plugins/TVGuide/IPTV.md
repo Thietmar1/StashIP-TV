@@ -1,4 +1,4 @@
-# TVGuide channel management, Jellyfin and Stashy
+# TVGuide channel management, Jellyfin, Stashy, Plex and Emby
 
 TVGuide's included IPTV server exposes the Stash guide as live channels:
 
@@ -10,6 +10,12 @@ TVGuide's included IPTV server exposes the Stash guide as live channels:
 - `/stashy/graphql`: optional read-only virtual library for Stashy (1.2.0+).
 - `/stashy/scene/<virtual-id>/stream.m3u8`: buffered live HLS for Stashy (1.2.1+),
   with token-authenticated rolling segments and support for its HLS fallback URL.
+- Optional Plex virtual tuner: `/discover.json`, `/device.xml`, `/lineup.json`,
+  `/lineup.xml`, `/lineup_status.json`, `/auto/v<number>` and `/guide.xml` (1.3.0+).
+  These require an enabled tuner and an allowed server IP. See [Plex/Emby setup](PLEX-EMBY.md).
+
+Emby uses the existing M3U and XMLTV URLs directly. Custom names can be saved in
+**TVGuide → Rename → Save name** and are shared across all integrations.
 
 The Stash browser now contains **channel management only**. The old browser
 player and programme grid are not included in the browser bundle. Saved lineups,
@@ -68,6 +74,8 @@ Open TVGuide's plugin settings and set:
 | IPTV Maximum Streams | `2` (zero/empty also uses 2 in 1.1.2+) |
 | IPTV First Channel Number | `12` (default; reserves 1–11 for existing channels) |
 | Enable Stashy Adapter (Prototype) | Off by default; enable for an additional Stashy server at `Public URL/stashy` |
+| Enable Plex HDHomeRun Tuner (Prototype) | Off by default; enable for Plex's manual network tuner setup |
+| Plex Tuner Allowed IPs | Required for the virtual tuner; comma-separated trusted media server IP addresses |
 
 Leave **IPTV Stash URL** empty to use Stash's local task connection. If Stash returns
 media URLs using an external origin, set this field to that same reachable origin.
@@ -177,6 +185,8 @@ TVGUIDE_EPG_DAYS=3
 TVGUIDE_MAX_STREAMS=2
 TVGUIDE_FIRST_CHANNEL_NUMBER=12
 TVGUIDE_STASHY_ENABLED=false
+TVGUIDE_PLEX_ENABLED=false
+TVGUIDE_PLEX_CLIENTS=
 TZ=Europe/Berlin
 ```
 

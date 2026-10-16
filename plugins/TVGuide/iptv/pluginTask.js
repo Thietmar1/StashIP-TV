@@ -44,6 +44,8 @@ export async function pluginConfig(input, { client = createStashClient } = {}) {
         TVGUIDE_MAX_STREAMS: optionalNumber(stored.iptv_08_max_streams),
         TVGUIDE_FIRST_CHANNEL_NUMBER: optionalNumber(stored.iptv_11_first_channel_number),
         TVGUIDE_STASHY_ENABLED: String(stored.iptv_12_stashy_adapter === true),
+        TVGUIDE_PLEX_ENABLED: String(stored.iptv_13_plex_tuner === true),
+        TVGUIDE_PLEX_CLIENTS: stored.iptv_14_plex_clients,
         FFMPEG_PATH: stored.iptv_10_ffmpeg || data.configuration.general?.ffmpegPath || 'ffmpeg'
     });
     if (!stored.iptv_03_public_url) throw new Error('Set IPTV Public URL in TVGuide plugin settings to the Stash LXC address on port 9898');

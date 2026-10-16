@@ -1,3 +1,5 @@
+import { parseTunerClients } from './tunerAccess.js';
+
 /** Configuration for the optional Node/FFmpeg companion; no Stash writes. */
 function httpUrl(value, name) {
     let url;
@@ -17,6 +19,9 @@ function integer(value, fallback, min, max, name) {
 export function readConfig(env = process.env) {
     const token = env.TVGUIDE_TOKEN || '';
     if (!/^[A-Za-z0-9_-]{24,}$/.test(token)) throw new Error('TVGUIDE_TOKEN needs at least 24 letters, digits, hyphens or underscores');
+    const tunerEnabled = env.TVGUIDE_PLEX_ENABLED === 'true';
+    const tunerClients = tunerEnabled ? parseTunerClients(env.TVGUIDE_PLEX_CLIENTS) : [];
+    if (tunerEnabled && !tunerClients.length) throw new Error('Set Plex Tuner Allowed IPs before enabling the tuner');
     return {
         stashUrl: httpUrl(env.STASH_URL || 'http://127.0.0.1:9999', 'STASH_URL'),
         apiKey: env.STASH_API_KEY || '',
@@ -28,6 +33,7 @@ export function readConfig(env = process.env) {
         maxStreams: integer(env.TVGUIDE_MAX_STREAMS, 2, 1, 32, 'TVGUIDE_MAX_STREAMS'),
         firstChannelNumber: integer(env.TVGUIDE_FIRST_CHANNEL_NUMBER, 12, 1, 999999, 'TVGUIDE_FIRST_CHANNEL_NUMBER'),
         stashyEnabled: env.TVGUIDE_STASHY_ENABLED === 'true',
+        tunerEnabled, tunerClients,
         ffmpeg: env.FFMPEG_PATH || 'ffmpeg',
         token
     };

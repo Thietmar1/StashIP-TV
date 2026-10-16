@@ -2,7 +2,7 @@
 
 Fork of [hippochapel/hippo-stash-plugins](https://github.com/hippochapel/hippo-stash-plugins),
 with TVGuide channel management, M3U/XMLTV live TV for Jellyfin and an optional
-read-only Stashy adapter prototype.
+read-only Stashy adapter prototype, Emby M3U/XMLTV and a Plex virtual tuner prototype.
 
 ## Install TVGuide in Stash
 
@@ -21,6 +21,8 @@ in TVGuide's plugin settings, then run
 service is needed for plugin-managed operation.
 
 See [IPTV setup](plugins/TVGuide/IPTV.md) for the settings and Jellyfin URLs.
+See [Plex and Emby setup](plugins/TVGuide/PLEX-EMBY.md) for Live TV/EPG and
+custom channel names (**TVGuide → Rename → Save name**).
 The Stash browser button opens channel management; the browser player is no
 longer included. See [Stashy setup and limitations](plugins/TVGuide/NATIVE-APPS.md)
 to expose each live channel as a virtual scene named after the channel and its

@@ -439,7 +439,7 @@ describe('per-channel customisation', () => {
         const editor = openEditor(manager, 'studio:1');
         const input = editor.querySelector('input[type="text"]');
         input.value = 'Short Name';
-        input.dispatchEvent(new Event('change'));
+        editor.querySelector('form').dispatchEvent(new Event('submit', { cancelable: true }));
 
         expect(store.getState().channels.find((c) => c.id === 'studio:1').name).toBe('Short Name');
         expect(store.getState().allChannels.find((c) => c.id === 'studio:1').name).toBe('Alpha');
@@ -457,7 +457,7 @@ describe('per-channel customisation', () => {
         const editor = openEditor(manager, 'studio:1');
         const input = editor.querySelector('input[type="text"]');
         input.value = '';
-        input.dispatchEvent(new Event('change'));
+        editor.querySelector('form').dispatchEvent(new Event('submit', { cancelable: true }));
 
         expect(store.getState().channels.find((c) => c.id === 'studio:1').name).toBe('Alpha');
     });
