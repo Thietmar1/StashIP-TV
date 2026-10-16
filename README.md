@@ -1,7 +1,8 @@
 # Thietmar1 Stash plugins
 
 Fork of [hippochapel/hippo-stash-plugins](https://github.com/hippochapel/hippo-stash-plugins),
-with TVGuide M3U playlists, XMLTV listings and live streams for Jellyfin.
+with TVGuide channel management, M3U/XMLTV live TV for Jellyfin and an optional
+read-only Stashy adapter prototype.
 
 ## Install TVGuide in Stash
 
@@ -11,13 +12,19 @@ In **Settings → Plugins → Available Plugins → Add Source**, add:
 https://raw.githubusercontent.com/Thietmar1/hippo-stash-plugins/tvguide-iptv/index.yml
 ```
 
-Refresh the source and install **TV Guide**. The package includes the guide and
-IPTV server. Install Node.js 20+ and FFmpeg in the Stash LXC (`apt install nodejs
-ffmpeg`), configure the IPTV fields in TVGuide's plugin settings, then run
+Refresh the source and install **TV Guide**. The package includes channel
+management and the IPTV server. Install Node.js 20+ and FFmpeg in the environment
+running Stash: inside its Docker container when using Docker, or in the LXC for
+a native installation (`apt install nodejs ffmpeg`). Configure the IPTV fields
+in TVGuide's plugin settings, then run
 **Start IPTV Server** in Stash's Tasks page. No npm install or separate systemd
 service is needed for plugin-managed operation.
 
 See [IPTV setup](plugins/TVGuide/IPTV.md) for the settings and Jellyfin URLs.
+The Stash browser button opens channel management; the browser player is no
+longer included. See [Stashy setup and limitations](plugins/TVGuide/NATIVE-APPS.md)
+to expose each live channel as a virtual scene named after the channel and its
+current programme. Playback on an actual iOS/tvOS device still needs verification.
 Stop the IPTV server before a plugin update, then start it again afterwards.
 The `tvguide-iptv` branch contains the compiled package and its SHA256-verified
 index. The publish workflow updates that branch when changes land on `main`.

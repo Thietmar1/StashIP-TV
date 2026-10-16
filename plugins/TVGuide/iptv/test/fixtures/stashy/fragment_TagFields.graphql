@@ -1,0 +1,4 @@
+fragment TagFields on Tag {
+  id name description image_path scene_count image_count gallery_count scene_marker_count performer_count favorite created_at updated_at
+}
+

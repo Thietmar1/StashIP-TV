@@ -27,6 +27,7 @@ export function readConfig(env = process.env) {
         days: integer(env.TVGUIDE_EPG_DAYS, 3, 1, 7, 'TVGUIDE_EPG_DAYS'),
         maxStreams: integer(env.TVGUIDE_MAX_STREAMS, 2, 1, 32, 'TVGUIDE_MAX_STREAMS'),
         firstChannelNumber: integer(env.TVGUIDE_FIRST_CHANNEL_NUMBER, 12, 1, 999999, 'TVGUIDE_FIRST_CHANNEL_NUMBER'),
+        stashyEnabled: env.TVGUIDE_STASHY_ENABLED === 'true',
         ffmpeg: env.FFMPEG_PATH || 'ffmpeg',
         token
     };
@@ -103,4 +104,3 @@ export function createStashClient(config, fetchFn = fetch) {
         return body.data;
     };
 }
-

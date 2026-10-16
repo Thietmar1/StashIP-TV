@@ -130,10 +130,13 @@ describe('loadPluginConfiguration', () => {
 describe('ordered settings migration', () => {
     const response = (config) => ({ configuration: { plugins: { TVGuide: config } } });
 
-    it('groups toggles before numeric settings using exactly the keys declared in the manifest', () => {
+    it('exposes management and scheduling settings while preserving legacy player migration keys', () => {
         const manifest = readFileSync('TVGuide.yml', 'utf8');
         const keys = [...manifest.matchAll(/^  (guide_\w+):$/gm)].map((match) => match[1]);
-        expect(keys).toEqual(Object.values(SETTING_KEYS));
+        const active = ['guide_navbar_button', 'guide_min_scenes', 'guide_pool_cap',
+            'guide_new_release_days', 'guide_recently_added_days',
+            'guide_movie_min_minutes', 'guide_short_max_minutes'];
+        expect(keys).toEqual(active.map((key) => SETTING_KEYS[key]));
         expect(keys).toEqual([...keys].sort());
         expect(Object.keys(SETTING_KEYS).sort()).toEqual(Object.keys(DEFAULT_SETTINGS).sort());
         expect(Object.keys(SETTING_KEYS).slice(0, 6).every((key) => typeof DEFAULT_SETTINGS[key] === 'boolean')).toBe(true);

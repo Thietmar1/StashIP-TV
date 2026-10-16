@@ -4,15 +4,17 @@ import { createStashClient, stashMediaUrl, stashHeaders, endpoint, StashRequestE
 import { loadGuide, renderM3u, renderXmltv, playableChannels, nextMidnight, numberChannels } from './guide.js';
 import { dayBucket } from '../src/domain/schedule.js';
 import { streamChannel } from './stream.js';
+import { createStashyAdapter } from './stashy.js';
 
-function authorized(request, url, token) {
-    const supplied = request.headers.authorization?.replace(/^Bearer /, '') || url.searchParams.get('token') || '';
+function authorized(request, url, token, adapter = false) {
+    const supplied = (adapter && (request.headers.apikey || url.searchParams.get('apikey'))) ||
+        request.headers.authorization?.replace(/^Bearer /, '') || url.searchParams.get('token') || '';
     const a = Buffer.from(supplied);
     const b = Buffer.from(token);
     return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export function createIptvServer(config, { gql = createStashClient(config), load = loadGuide, stream = streamChannel, fetchFn = fetch, now = Date.now, log = console.error } = {}) {
+export function createIptvServer(config, { gql = createStashClient(config), load = loadGuide, stream = streamChannel, fetchFn = fetch, now = Date.now, log = console.error, adapterBootstrap } = {}) {
     let snapshot;
     let expires = 0;
     let active = 0;
@@ -30,6 +32,7 @@ export function createIptvServer(config, { gql = createStashClient(config), load
         }
         return snapshot;
     };
+    const stashy = createStashyAdapter(config, { gql, getGuide, now, bootstrap: adapterBootstrap });
 
     const server = createServer(async (request, response) => {
         const reply = (status, text, type = 'text/plain; charset=utf-8') => {
@@ -56,10 +59,48 @@ export function createIptvServer(config, { gql = createStashClient(config), load
                 }
                 return reply(405, 'Method not allowed\n');
             }
-            if (!authorized(request, url, config.token)) return reply(401, 'Unauthorized\n');
-            if (!['GET', 'HEAD'].includes(request.method)) return reply(405, 'GET or HEAD required\n');
             if (prefix && !url.pathname.startsWith(`${prefix}/`)) return reply(404, 'Not found\n');
             const path = url.pathname.slice(prefix.length);
+            if (path.startsWith('/stashy/')) {
+                if (!config.stashyEnabled) return reply(404, 'Adapter disabled\n');
+                if (!authorized(request, url, config.token, true)) return reply(401, 'Unauthorized\n');
+                if (path === '/stashy/graphql') {
+                    if (request.method !== 'POST') return reply(405, 'POST required\n');
+                    if (!request.headers['content-type']?.toLowerCase().startsWith('application/json')) return reply(415, 'JSON required\n');
+                    const chunks = [];
+                    let size = 0;
+                    for await (const part of request) {
+                        size += part.length;
+                        if (size > 65536) return reply(413, 'Request too large\n');
+                        chunks.push(part);
+                    }
+                    let input;
+                    try { input = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return reply(400, 'Invalid JSON\n'); }
+                    return reply(200, JSON.stringify(await stashy.request(input)), 'application/json; charset=utf-8');
+                }
+                if (!['GET', 'HEAD'].includes(request.method)) return reply(405, 'GET or HEAD required\n');
+                const image = /^\/stashy\/scene\/([^/]+)\/screenshot$/.exec(path);
+                if (image) {
+                    const source = await stashy.imageScene(decodeURIComponent(image[1]));
+                    if (!source) return reply(404, 'No image\n');
+                    const upstream = await fetchFn(stashMediaUrl(config, source), {
+                        headers: stashHeaders(config), signal: AbortSignal.timeout(15000), redirect: 'error'
+                    });
+                    const type = upstream.headers.get('content-type') || '';
+                    if (!upstream.ok || !/^image\/(png|jpeg|webp|gif)(;|$)/i.test(type)) return reply(502, 'Image unavailable\n');
+                    const chunks = [];
+                    let size = 0;
+                    for await (const chunk of upstream.body) {
+                        size += chunk.length;
+                        if (size > 5 * 1024 * 1024) throw new Error('Image exceeds limit');
+                        chunks.push(chunk);
+                    }
+                    return reply(200, Buffer.concat(chunks), type);
+                }
+                return reply(404, 'Not found\n');
+            }
+            if (!authorized(request, url, config.token)) return reply(401, 'Unauthorized\n');
+            if (!['GET', 'HEAD'].includes(request.method)) return reply(405, 'GET or HEAD required\n');
             if (path === '/health') return reply(200, 'TVGuide IPTV is running\n');
             if (!['/playlist.m3u', '/epg.xml'].includes(path) && !/^\/(stream|logo)\/[^/]+$/.test(path)) return reply(404, 'Not found\n');
             const guide = await getGuide();
@@ -118,4 +159,3 @@ export function createIptvServer(config, { gql = createStashClient(config), load
     });
     return { server, getGuide, close() { server.close(); server.closeAllConnections(); } };
 }
-

@@ -1,0 +1,25 @@
+fragment SceneFields on Scene {
+  id title details director date organized resume_time play_count play_duration last_played_at o_counter rating100 created_at updated_at interactive
+  studio { ...StudioFields }
+  performers { ...PerformerFields }
+  files { id path format width height duration video_codec audio_codec bit_rate frame_rate }
+  tags { ...TagFields }
+  galleries { id title date image_count updated_at cover { id paths { thumbnail } } }
+  groups { group { id name updated_at front_image_path } scene_index }
+  paths { screenshot preview stream webp vtt sprite funscript interactive_heatmap caption }
+  captions { language_code caption_type }
+  custom_fields
+  stash_ids { endpoint stash_id }
+  scene_markers {
+    id
+    title
+    seconds
+    end_seconds
+    primary_tag { id name }
+    tags { id name }
+    screenshot
+    preview
+    stream
+  }
+}
+

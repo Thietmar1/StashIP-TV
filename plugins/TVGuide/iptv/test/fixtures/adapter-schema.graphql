@@ -1,0 +1,57 @@
+# Small authored test schema matching the Stash fields used by client fixtures.
+# Production loads the actual server schema via introspection.
+scalar Time
+scalar Map
+scalar Int64
+enum SortDirectionEnum { ASC DESC }
+enum CriterionModifier { EQUALS NOT_EQUALS GREATER_THAN LESS_THAN BETWEEN NOT_BETWEEN IS_NULL NOT_NULL INCLUDES EXCLUDES INCLUDES_ALL }
+enum FilterMode { SCENES IMAGES }
+enum SystemStatusEnum { OK }
+input FindFilterType { page: Int per_page: Int sort: String direction: SortDirectionEnum q: String }
+input StringCriterionInput { value: String! modifier: CriterionModifier! }
+input IntCriterionInput { value: Int! value2: Int modifier: CriterionModifier! }
+input MultiCriterionInput { value: [ID!] excludes: [ID!] modifier: CriterionModifier! depth: Int }
+input SceneFilterType { title: StringCriterionInput rating100: IntCriterionInput organized: Boolean interactive: Boolean studios: MultiCriterionInput tags: MultiCriterionInput AND: SceneFilterType OR: SceneFilterType NOT: SceneFilterType }
+type VideoFile { id: ID! path: String basename: String format: String width: Int height: Int duration: Float video_codec: String audio_codec: String bit_rate: Int frame_rate: Float size: Int64 created_at: Time updated_at: Time }
+type ScenePathsType { screenshot: String preview: String stream: String webp: String vtt: String sprite: String funscript: String interactive_heatmap: String caption: String }
+type SceneStreamEndpoint { url: String! mime_type: String label: String }
+type VideoCaption { language_code: String! caption_type: String! }
+type StashID { endpoint: String! stash_id: String! }
+type Tag { id: ID! name: String! description: String image_path: String scene_count: Int image_count: Int gallery_count: Int scene_marker_count: Int performer_count: Int favorite: Boolean created_at: Time updated_at: Time }
+type Studio { id: ID! name: String! url: String details: String image_path: String scene_count: Int performer_count: Int gallery_count: Int image_count: Int favorite: Boolean rating100: Int created_at: Time updated_at: Time tags: [Tag!]! }
+type Performer { id: ID! name: String! image_path: String disambiguation: String birthdate: String country: String scene_count: Int image_count: Int gallery_count: Int o_counter: Int gender: String ethnicity: String height_cm: Int weight: Int measurements: String fake_tits: String penis_length: Float career_length: String tattoos: String piercings: String alias_list: [String!]! favorite: Boolean rating100: Int created_at: Time updated_at: Time tags: [Tag!]! }
+type ImagePaths { thumbnail: String }
+type Image { id: ID! paths: ImagePaths }
+type Gallery { id: ID! title: String date: String image_count: Int updated_at: Time cover: Image }
+type Group { id: ID! name: String! updated_at: Time front_image_path: String }
+type SceneGroup { group: Group! scene_index: Int }
+type SceneMarker { id: ID! title: String seconds: Float! end_seconds: Float primary_tag: Tag tags: [Tag!]! screenshot: String preview: String stream: String }
+type Scene { id: ID! title: String code: String details: String director: String date: String organized: Boolean! resume_time: Float play_count: Int play_duration: Float last_played_at: Time o_counter: Int rating100: Int created_at: Time! updated_at: Time! interactive: Boolean! studio: Studio performers: [Performer!]! files: [VideoFile!]! tags: [Tag!]! galleries: [Gallery!]! groups: [SceneGroup!]! paths: ScenePathsType! captions: [VideoCaption!]! custom_fields: Map stash_ids: [StashID!]! scene_markers: [SceneMarker!]! sceneStreams: [SceneStreamEndpoint!]! urls: [String!]! }
+type FindScenesResultType { count: Int! scenes: [Scene!]! duration: Float! filesize: Float! }
+type FindStudiosResultType { count: Int! studios: [Studio!]! }
+type EmptyResult { count: Int! }
+type Version { version: String! hash: String build_time: String }
+type SystemStatus { status: SystemStatusEnum! }
+type StashConfig { path: String! excludeVideo: Boolean! excludeImage: Boolean! }
+type StashBox { endpoint: String! name: String! }
+type GeneralConfig { stashes: [StashConfig!]! stashBoxes: [StashBox!]! apiKey: String }
+type FieldOption { field: String strategy: String createMissing: Boolean }
+type IdentifyOptions { fieldOptions: [FieldOption!]! setCoverImage: Boolean setOrganized: Boolean includeMalePerformers: Boolean performerGenders: [String!]! skipMultipleMatches: Boolean skipMultipleMatchTag: String skipSingleNamePerformers: Boolean skipSingleNamePerformerTag: String }
+type IdentifySource { stash_box_endpoint: String stash_box_index: Int }
+type IdentifySourceOptions { source: IdentifySource options: IdentifyOptions }
+type IdentifyDefaults { sources: [IdentifySourceOptions!]! options: IdentifyOptions }
+type DefaultConfig { identify: IdentifyDefaults }
+type ConfigResult { general: GeneralConfig defaults: DefaultConfig plugins: Map }
+type Stats { scene_count: Int! scenes_size: Int64! scenes_duration: Float! image_count: Int! images_size: Int64! gallery_count: Int! performer_count: Int! studio_count: Int! group_count: Int! tag_count: Int! total_o_count: Int! total_play_duration: Float! total_play_count: Int! scenes_played: Int! movie_count: Int! }
+type SavedFilter { id: ID! name: String! mode: FilterMode! object_filter: Map }
+type Query {
+ version: Version! systemStatus: SystemStatus! configuration: ConfigResult! stats: Stats!
+ findScenes(scene_filter: SceneFilterType, filter: FindFilterType, ids: [ID!], scene_ids: [Int!]): FindScenesResultType!
+ findScene(id: ID!): Scene allScenes: [Scene!]!
+ findStudios(ids: [ID!], filter: FindFilterType): FindStudiosResultType!
+ findStudio(id: ID!): Studio allStudios: [Studio!]!
+ findSavedFilters(mode: FilterMode): [SavedFilter!]! findSavedFilter(id: ID!): SavedFilter
+ findSceneMarkers(filter: FindFilterType): EmptyResult!
+ privateLibrarySecret: String
+}
+type Mutation { sceneDestroy(id: ID!): Boolean! }

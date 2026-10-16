@@ -1,6 +1,6 @@
 name: TV Guide
-description: Presents your library as live TV channels with a cable-style programme guide and optional M3U/XMLTV live streaming for Jellyfin.
-version: "1.1.7"
+description: Channel management, M3U/XMLTV live streaming for Jellyfin and an optional read-only Stashy adapter.
+version: "1.2.0"
 url: https://github.com/Thietmar1/hippo-stash-plugins/tree/main/plugins/TVGuide
 interface: raw
 errLog: info
@@ -75,37 +75,17 @@ settings:
     displayName: IPTV First Channel Number
     description: "First channel number in M3U and XMLTV. Default 12 (reserves 1-11 for existing tuners). Range 1-999999; zero/empty uses 12. Numbering follows the TVGuide lineup; empty channels reserve their number. Stop/start the IPTV server and refresh Jellyfin after changing this."
     type: NUMBER
-  guide_01_12_hour_clock:
-    displayName: Use 12-Hour Clock
-    description: "Show times with AM/PM throughout TV Guide. Enabled by default. Reload the page after changing this setting."
-    type: BOOLEAN
-  guide_02_autoplay:
-    displayName: Autoplay Preview
-    description: "Play the tuned channel in the corner viewer. Disable for a guide-only, no-video view."
-    type: BOOLEAN
-  guide_03_channel_info:
-    displayName: Show Channel Info Overlay
-    description: "Show channel and scene information in fullscreen. Enabled by default. Disable to hide the overlay while keeping playback controls. Reload the page after changing this setting."
-    type: BOOLEAN
-  guide_04_start_muted:
-    displayName: Start Muted
-    description: "Start the corner viewer muted. Browsers block autoplay with sound, so disabling this may stop playback from starting on its own."
+  iptv_12_stashy_adapter:
+    displayName: Enable Stashy Adapter (Prototype)
+    description: "Expose a read-only virtual Stash library at IPTV Public URL + /stashy. Add it as a separate server in Stashy, using the IPTV Access Token as its API key. Channel and current scene names are shown. Requires a device playback check on iOS/tvOS. Stop/start the server after changing this."
     type: BOOLEAN
   guide_05_navbar_button:
     displayName: Show Navbar Button
-    description: "Show the TV Guide button in the Stash navigation bar. The guide is always reachable at #tvguide."
-    type: BOOLEAN
-  guide_06_sfw_text:
-    displayName: "Demo Mode (SFW)"
-    description: "Show fictional text and neutral artwork, hide video and mute audio while preserving TV Guide's layout. Independent of SFW Switch. Masks searches and disables name/logo editing and links to real content. Disabled by default. Reload the page after changing this setting."
+    description: "Show the channel-management button in the Stash navigation bar. Channel management is always reachable at #tvguide."
     type: BOOLEAN
   guide_07_min_scenes:
     displayName: Minimum Scenes Per Channel
     description: "Sources with fewer scenes than this are not turned into channels. Default 5."
-    type: NUMBER
-  guide_08_window_hours:
-    displayName: Guide Window (hours)
-    description: "How many hours of programming the guide grid shows at once. Default 3."
     type: NUMBER
   guide_09_pool_cap:
     displayName: Scenes Per Channel
@@ -127,8 +107,3 @@ settings:
     displayName: Short Maximum Length (minutes)
     description: "Scenes shorter than this are included in the Shorts channel. Default 5."
     type: NUMBER
-  guide_14_short_scene_minutes:
-    displayName: Short Scene Grouping (minutes)
-    description: "Consecutive scenes shorter than this appear as one guide block. Default 15."
-    type: NUMBER
-
