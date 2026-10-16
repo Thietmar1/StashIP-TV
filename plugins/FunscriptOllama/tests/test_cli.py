@@ -173,7 +173,7 @@ class ProcessTests(unittest.TestCase):
             script.write_text("// fixture")
             (package / "package.json").write_text(json.dumps({"bin": {"gemini": "bundle/gemini.js"}}))
             with patch.object(cli.shutil, "which", side_effect=lambda name: "node-exe" if name == "node" else str(root / "gemini.cmd")):
-                self.assertEqual(cli.cli_command("gemini", "Gemini CLI"), ["node-exe", str(script)])
+                self.assertEqual(cli.cli_command("gemini", "Gemini CLI"), ["node-exe", str(script.resolve())])
             script.unlink()
             with patch.object(cli.shutil, "which", return_value=str(root / "gemini.cmd")), self.assertRaisesRegex(RuntimeError, "no shell wrappers"):
                 cli.cli_command("gemini", "Gemini CLI")
