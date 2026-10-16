@@ -7,7 +7,11 @@ removed. Preserve the original AGPL license and notices.
 Funscript Ollama uses Python/OpenCV plus native Ollama vision/structured JSON.
 Run `python -m unittest discover -s plugins/FunscriptOllama/tests -v` and
 `python tools/package_funscript_ollama.py --output-dir dist/funscript-ollama --revision local --check`.
-Keep its package and `funscript-ollama` installation branch separate from TVGuide.
+Keep the two plugin packages independent. `tools/package_catalog.py` builds the
+shared `tvguide-iptv/index.yml` with both IDs and archives. The single release
+workflow waits for both test matrices before publishing this shared source and
+the compatible Funscript-only `funscript-ollama` source. Do not add a competing
+publisher that overwrites the shared index with only one plugin.
 Never overwrite media sidecars by default, generate invented timing from model
 responses, install dependencies at task runtime or log access credentials.
 

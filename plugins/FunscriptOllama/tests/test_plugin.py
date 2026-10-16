@@ -16,6 +16,7 @@ import cv2
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 SPEC = importlib.util.spec_from_file_location("funscript_ollama", ROOT / "funscript_ollama.py")
 plugin = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(plugin)
