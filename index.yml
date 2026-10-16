@@ -2,7 +2,7 @@
   name: StashIP-TV
   metadata:
     description: StashIP-TV live channels and EPG for Jellyfin, Stashy, Plex and Emby.
-  version: "1.5.1-9905dc50b04f"
-  date: "2026-10-16 13:38:48"
+  version: "1.5.1-ac956dd7fa64"
+  date: "2026-10-16 14:58:17"
   path: StashIP-TV.zip
-  sha256: 89a54b22c9157b6610fd5257a42842d8852e790bff795ae21da731b97af8a30b
+  sha256: 620831eb8c88a1e366e4cee2293f5a7663116fe7818bee58ea98f81cb81055fa
