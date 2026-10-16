@@ -5,15 +5,23 @@ on:
     branches: [main]
     paths:
       - 'plugins/StashIP-TV/**'
+      - 'plugins/FunscriptOllama/**'
       - 'tools/package_stashiptv.py'
+      - 'tools/package_funscript_ollama.py'
+      - 'tools/package_catalog.py'
       - '.github/workflows/publish-stashiptv.yml'
       - 'README.md'
+      - 'LICENCE'
   pull_request:
     paths:
       - 'plugins/StashIP-TV/**'
+      - 'plugins/FunscriptOllama/**'
       - 'tools/package_stashiptv.py'
+      - 'tools/package_funscript_ollama.py'
+      - 'tools/package_catalog.py'
       - '.github/workflows/publish-stashiptv.yml'
       - 'README.md'
+      - 'LICENCE'
   workflow_dispatch:
 
 permissions:
@@ -65,11 +73,32 @@ jobs:
         working-directory: plugins/StashIP-TV
         run: npm run test:iptv
       - name: Validate package
-        run: python tools/package_stashiptv.py --output-dir dist --revision ci --check
+        run: python tools/package_catalog.py --output-dir dist --revision ci --check
+
+  test_funscript:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.11', '3.13']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: plugins/FunscriptOllama/requirements.txt
+      - name: Install Funscript dependencies
+        run: python -m pip install -r plugins/FunscriptOllama/requirements.txt
+      - name: Test Ollama, Haven, VR, multi-axis and chapters
+        run: python -m unittest discover -s plugins/FunscriptOllama/tests -v
+      - name: Validate Funscript package
+        run: python tools/package_funscript_ollama.py --output-dir dist --revision ci --check
 
   publish:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: test
+    needs: [test, test_funscript]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -83,19 +112,31 @@ jobs:
       - name: Build
         working-directory: plugins/StashIP-TV
         run: npm ci && npm run build
-      - name: Package plugin and stable Stash index
-        run: python3 tools/package_stashiptv.py --output-dir dist --revision "${GITHUB_SHA::12}" --check
-      - uses: actions/checkout@v4
-        with:
-          ref: tvguide-iptv
-          path: install-source
-      - name: Update install source
+      - name: Package both plugins and shared Stash index
+        run: python3 tools/package_catalog.py --output-dir dist --revision "${GITHUB_SHA::12}" --check
+      - name: Update shared source and compatible Funscript source
         run: |
-          cp dist/index.yml dist/StashIP-TV.zip install-source/
-          cd install-source
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add index.yml StashIP-TV.zip
-          if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'Publish StashIP-TV plugin package'
-          git push origin HEAD:tvguide-iptv
+          publish_source() {
+            branch="$1"; folder="$2"; index="$3"; shift 3
+            if git ls-remote --exit-code --heads origin "refs/heads/$branch" > /dev/null; then
+              git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch"
+              git worktree add "$folder" -b "publish-$branch" "origin/$branch"
+            else
+              git worktree add --detach "$folder" HEAD
+              git -C "$folder" checkout --orphan "publish-$branch"
+              git -C "$folder" rm -r --cached .
+            fi
+            cp "$index" "$folder/index.yml"
+            cp "$@" "$folder/"
+            (
+              cd "$folder"
+              git config user.name 'github-actions[bot]'
+              git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+              git add index.yml ./*.zip
+              if git diff --cached --quiet; then exit 0; fi
+              git commit -m 'Publish Stash plugin catalog'
+              git push origin "HEAD:refs/heads/$branch"
+            )
+          }
+          publish_source tvguide-iptv install-source dist/index.yml dist/StashIP-TV.zip dist/FunscriptOllama.zip
+          publish_source funscript-ollama legacy-install-source dist/funscript/index.yml dist/FunscriptOllama.zip

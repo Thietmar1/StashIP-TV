@@ -1,6 +1,6 @@
 name: Funscript Ollama
-description: Experimental Qwen-guided optical motion analysis. Creates a single-axis funscript next to tagged videos.
-version: "0.1.1"
+description: Experimental Ollama/Haven motion analysis, VR/POV processing, multi-axis sidecars and Funscript chapter markers.
+version: "0.2.0"
 url: https://github.com/Thietmar1/StashIP-TV/tree/main/plugins/FunscriptOllama
 exec:
   - python
@@ -15,7 +15,19 @@ tasks:
     description: Process scenes tagged FunscriptOllama_Process, sequentially. Existing scripts are preserved by default.
     defaultArgs:
       mode: process_scenes
+  - name: Import Chapters From Tagged Scenes
+    description: Import metadata.chapters from existing sidecars of queued scenes. Does not call Ollama or change script files.
+    defaultArgs:
+      mode: import_chapters
+  - name: Import Chapters From All Scenes
+    description: Scan all scene file paths for primary funscripts and import missing chapter markers. Existing markers are preserved.
+    defaultArgs:
+      mode: import_all_chapters
 settings:
+  engine:
+    displayName: Processing Engine
+    description: "ollama (default), haven (no Ollama requests), or ollama_haven (Qwen region plus Haven radial flow)."
+    type: STRING
   ollama_url:
     displayName: Ollama URL
     description: "Default: http://192.168.178.16:11434. Reachable from the Stash process/container; no /api/chat suffix."
@@ -55,4 +67,84 @@ settings:
   overwrite:
     displayName: Overwrite Existing Funscript
     description: "Default: off. When enabled, first preserve the previous file in a uniquely named backup."
+    type: BOOLEAN
+  threads:
+    displayName: Motion Worker Threads
+    description: "Default: 2; integer 1–32. Optical-flow workers; does not configure Ollama threads."
+    type: NUMBER
+  batch_size:
+    displayName: Maximum Queued Frame Pairs
+    description: "Default: 32; integer 1–3000. Bounds optical-flow work waiting in memory. Higher values require more RAM."
+    type: NUMBER
+  detrend_window:
+    displayName: Detrend Window Seconds
+    description: "Default: 2; range 1–10. Removes slow drift from measured motion."
+    type: NUMBER
+  norm_window:
+    displayName: Normalization Window Seconds
+    description: "Default: 4; range 1–10. Local motion range calibration."
+    type: NUMBER
+  keyframe_reduction:
+    displayName: Reduce Keyframes
+    description: "Default: on. Keep direction changes instead of every measured point."
+    type: BOOLEAN
+  pov_mode:
+    displayName: POV Mode
+    description: "Default: off. Use Haven radial flow with a bottom-center motion origin inside the selected region."
+    type: BOOLEAN
+  balance_global:
+    displayName: Balance Global Motion
+    description: "Default: on. Directional mode subtracts background translation; radial mode uses Haven weighting."
+    type: BOOLEAN
+  vr_auto:
+    displayName: Detect VR Tags
+    description: "Default: on. Apply the configured VR crop when a scene has one of the VR Tags."
+    type: BOOLEAN
+  vr_tags:
+    displayName: VR Tags
+    description: "Default: VR,Virtual Reality,180°,360°. Comma-separated, case-insensitive."
+    type: STRING
+  vr_layout:
+    displayName: VR Layout
+    description: "haven (default, lower-left quarter), sbs (left eye), tb (top eye), mono (no crop). Applies to detected VR scenes."
+    type: STRING
+  multi_axis:
+    displayName: Generate Additional Axes
+    description: "Default: off. Generate surge, sway, twist, roll and pitch sidecars using Haven's activity-correlated noise."
+    type: BOOLEAN
+  multi_axis_intensity:
+    displayName: Additional Axis Intensity
+    description: "Default: 5; range 0–10. Scales generated secondary movement."
+    type: NUMBER
+  random_speed:
+    displayName: Additional Axis Variation Speed
+    description: "Default: 3; range 0–10. Time scale of generated noise; secondary axes are not measured 3D motion."
+    type: NUMBER
+  smart_limit:
+    displayName: Limit Additional Axes By Activity
+    description: "Default: on. Scale secondary movement by primary-axis activity."
+    type: BOOLEAN
+  auto_home_delay:
+    displayName: Auto Home Delay Seconds
+    description: "Default: 1; range 0–10. Minimum idle period before secondary-axis centering."
+    type: NUMBER
+  auto_home_duration:
+    displayName: Auto Home Duration Seconds
+    description: "Default: 1; range 0–10. Centering duration; zero selects immediate centering."
+    type: NUMBER
+  import_chapters:
+    displayName: Automatically Import Chapter Markers
+    description: "Default: on. Import metadata.chapters after processing or when preserving an existing script. Never delete existing markers."
+    type: BOOLEAN
+  export_chapters:
+    displayName: Export Stash Markers As Chapters
+    description: "Default: on. Include existing Stash markers in generated primary scripts and preserve old sidecar chapters on overwrite."
+    type: BOOLEAN
+  marker_tolerance:
+    displayName: Marker Duplicate Tolerance Seconds
+    description: "Default: 0.25; range 0–15. Matching title/tag and time are skipped; existing markers are never updated."
+    type: NUMBER
+  add_marker:
+    displayName: Add Completion Marker
+    description: "Default: off. Add Funscript Generated at zero seconds, using the Funscript tag."
     type: BOOLEAN

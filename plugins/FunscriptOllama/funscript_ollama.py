@@ -7,6 +7,7 @@ other than explicit image requests to the configured Ollama instance.
 from __future__ import annotations
 
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import json
 import math
 import os
@@ -20,7 +21,7 @@ from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 PLUGIN_ID = "FunscriptOllama"
-VERSION = "0.1.1"
+VERSION = "0.2.0"
 DEFAULTS = {
     "ollama_url": "http://192.168.178.16:11434",
     "model": "qwen3-vl:8b-instruct",
@@ -29,9 +30,24 @@ DEFAULTS = {
     "error_tag": "FunscriptOllama_Error",
     "analysis_fps": 10, "roi_interval": 20, "timeout_seconds": 600,
     "max_speed": 150, "overwrite": False,
+    "engine": "ollama", "threads": 2, "batch_size": 32,
+    "detrend_window": 2, "norm_window": 4, "keyframe_reduction": True,
+    "pov_mode": False, "balance_global": True,
+    "vr_auto": True, "vr_tags": "VR,Virtual Reality,180°,360°", "vr_layout": "haven",
+    "multi_axis": False, "multi_axis_intensity": 5, "random_speed": 3,
+    "auto_home_delay": 1, "auto_home_duration": 1, "smart_limit": True,
+    "import_chapters": True, "export_chapters": True, "marker_tolerance": 0.25,
+    "add_marker": False,
 }
 LIMITS = {"analysis_fps": (2, 30), "roi_interval": (2, 120),
-          "timeout_seconds": (10, 1800), "max_speed": (10, 500)}
+          "timeout_seconds": (10, 1800), "max_speed": (10, 500),
+          "threads": (1, 32), "batch_size": (1, 3000),
+          "detrend_window": (1, 10), "norm_window": (1, 10),
+          "multi_axis_intensity": (0, 10), "random_speed": (0, 10),
+          "auto_home_delay": (0, 10), "auto_home_duration": (0, 10),
+          "marker_tolerance": (0, 15)}
+BOOLEANS = ("overwrite", "keyframe_reduction", "pov_mode", "balance_global", "vr_auto",
+            "multi_axis", "smart_limit", "import_chapters", "export_chapters", "add_marker")
 REGION_SCHEMA = {
     "type": "object", "additionalProperties": False,
     "required": ["active", "confidence", "roi", "axis"],
@@ -66,8 +82,19 @@ def configuration(raw):
             raise ValueError(f"{key} must be a finite number")
         if not low <= value <= high:
             raise ValueError(f"{key} must be between {low} and {high}")
-    if type(settings["overwrite"]) is not bool:
-        raise ValueError("overwrite must be a boolean")
+    for key in ("threads", "batch_size"):
+        if settings[key] != int(settings[key]):
+            raise ValueError(f"{key} must be an integer")
+        settings[key] = int(settings[key])
+    for key in BOOLEANS:
+        if type(settings[key]) is not bool:
+            raise ValueError(f"{key} must be a boolean")
+    for key, allowed in (("engine", ("ollama", "haven", "ollama_haven")),
+                         ("vr_layout", ("haven", "sbs", "tb", "mono"))):
+        if settings[key] not in allowed:
+            raise ValueError(f"{key} must be one of {', '.join(allowed)}")
+    if not isinstance(settings["vr_tags"], str):
+        raise ValueError("vr_tags must be comma-separated names")
     for key in ("model", "trigger_tag", "complete_tag", "error_tag"):
         if not isinstance(settings[key], str) or not settings[key].strip():
             raise ValueError(f"{key} must be a nonempty string")
@@ -160,7 +187,7 @@ class Ollama:
         return validate_region(value)
 
 
-def measured_motion(previous, current, region):
+def measured_motion(previous, current, region, balance_global=True):
     """Median foreground flow with robust background translation compensation."""
     import cv2
     import numpy as np
@@ -179,7 +206,7 @@ def measured_motion(previous, current, region):
     bg = component[~foreground & texture]
     if fg.size < 16:
         return 0.0
-    movement = float(np.median(fg)) - (float(np.median(bg)) if bg.size >= 32 else 0.0)
+    movement = float(np.median(fg)) - (float(np.median(bg)) if balance_global and bg.size >= 32 else 0.0)
     return 0.0 if abs(movement) < 0.08 else movement
 
 
@@ -192,9 +219,10 @@ def is_cut(previous, current):
             float(np.mean(cv2.absdiff(previous, current))) > 30)
 
 
-def segment_actions(samples, max_speed):
+def segment_actions(samples, max_speed, settings=None):
     """Integrate measured motion, remove slow drift and reduce to extrema."""
     import numpy as np
+    settings = settings or DEFAULTS
     if len(samples) < 3:
         return []
     times = np.asarray([s[0] for s in samples], dtype=float)
@@ -205,16 +233,22 @@ def segment_actions(samples, max_speed):
         width = min(len(values), max(1, round(rate * seconds)))
         left, right = width // 2, width - 1 - width // 2
         return np.convolve(np.pad(values, (left, right), mode="edge"), np.ones(width)/width, mode="valid")
-    position -= rolling(position, 2)
+    position -= rolling(position, settings["detrend_window"])
     spread = float(np.percentile(position, 95) - np.percentile(position, 5))
     if spread < 0.5:
         return [{"at": int(times[0]), "pos": 50}, {"at": int(times[-1]), "pos": 50}]
-    position = np.clip(50 + position / max(spread, 1) * 80, 0, 100)
+    width = min(len(position), max(1, round(rate * settings["norm_window"])))
+    windows = np.lib.stride_tricks.sliding_window_view(
+        np.pad(position, (width//2, width-1-width//2), mode="edge"), width)
+    low, high = windows.min(axis=1), windows.max(axis=1)
+    position = np.clip((position-low) / np.maximum(high-low, 1) * 100, 0, 100)
     position = rolling(position, 0.15)
     # Limit the dense trace before reducing, rather than limiting only extrema.
     for i in range(1, len(position)):
         step = max_speed * (times[i] - times[i-1]) / 1000
         position[i] = np.clip(position[i], position[i-1]-step, position[i-1]+step)
+    if not settings["keyframe_reduction"]:
+        return [{"at": int(t), "pos": int(round(p))} for t, p in zip(times, position)]
     points = [{"at": int(times[0]), "pos": int(round(position[0]))}]
     direction = 0
     for i in range(1, len(position)):
@@ -246,12 +280,50 @@ def finalize_actions(segments, max_speed):
     return actions
 
 
-def analyze_video(path, settings, ollama, progress=lambda value: None):
+def vr_scene(scene, settings):
+    names = {name.strip().casefold() for name in settings["vr_tags"].split(",") if name.strip()}
+    return settings["vr_auto"] and any(str(t.get("name", "")).casefold() in names for t in scene.get("tags", []))
+
+
+def prepare_frame(frame, settings, vr=False):
+    import cv2
+    h, w = frame.shape[:2]
+    if vr:
+        layout = settings["vr_layout"]
+        if layout == "haven":
+            frame = frame[h//2:, :w//2]  # Same lower-left region as FunscriptHaven.
+        elif layout == "sbs":
+            frame = frame[:, :w//2]
+        elif layout == "tb":
+            frame = frame[:h//2, :]
+    h, w = frame.shape[:2]
+    scale = min(1, 512/max(w, h))
+    return cv2.resize(frame, (max(2, round(w*scale)), max(2, round(h*scale))))
+
+
+def measure_selected(previous, current, region, settings):
+    if not region["active"]:
+        return 0.0
+    if settings["engine"] == "ollama" and not settings["pov_mode"]:
+        return measured_motion(previous, current, region, settings["balance_global"])
+    from haven_motion import precompute_flow_info, radial_motion_weighted
+    h, w = previous.shape
+    l, t, r, b = region["roi"]
+    x1, x2, y1, y2 = int(l*w), max(int(l*w)+2, int(r*w)), int(t*h), max(int(t*h)+2, int(b*h))
+    if min(previous[y1:y2, x1:x2].shape) < 2:
+        raise ValueError("Selected region is too small for radial motion analysis")
+    info = precompute_flow_info(previous[y1:y2, x1:x2], current[y1:y2, x1:x2], settings)
+    return float(radial_motion_weighted(info["flow"], info["pos_center"], info["cut"],
+                                        settings["pov_mode"], settings["balance_global"]))
+
+
+def analyze_video(path, settings, ollama, progress=lambda value: None, vr=False):
     import cv2
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
         cap.release()
         raise ValueError("OpenCV cannot open this video/codec")
+    executor = ThreadPoolExecutor(max_workers=settings["threads"])
     try:
         fps = cap.get(cv2.CAP_PROP_FPS)
         count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
@@ -262,6 +334,13 @@ def analyze_video(path, settings, ollama, progress=lambda value: None):
         index, previous, previous_color = 0, None, None
         last_at, last_refresh = -1, -math.inf
         region, samples, segments, regions = None, [], [], []
+        pending = []
+        def drain():
+            samples.extend((at, future.result()) for at, future in pending)
+            pending.clear()
+        def finish_segment():
+            drain()
+            segments.append(segment_actions(samples, settings["max_speed"], settings))
         while True:
             ok = cap.grab()
             if not ok:
@@ -272,9 +351,7 @@ def analyze_video(path, settings, ollama, progress=lambda value: None):
             ok, frame = cap.retrieve()
             if not ok:
                 raise ValueError("Video decoder failed while retrieving a frame")
-            h, w = frame.shape[:2]
-            frame = cv2.resize(frame, (max(1, round(w*min(1, 512/w))),
-                                       max(1, round(h*min(1, 512/w)))))
+            frame = prepare_frame(frame, settings, vr)
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             # Prefer decoder presentation timestamps, including variable frame rate.
             decoded_at = cap.get(cv2.CAP_PROP_POS_MSEC)
@@ -288,19 +365,22 @@ def analyze_video(path, settings, ollama, progress=lambda value: None):
                 continue
             cut = is_cut(previous, gray)
             if cut:
-                segments.append(segment_actions(samples, settings["max_speed"]))
+                finish_segment()
                 region, samples = None, [(at, 0.0)]
                 previous, previous_color = gray, frame
                 continue
             if region is None or at-last_refresh >= settings["roi_interval"]*1000:
                 # No displacement is measured across a cut or a changed tracking region.
-                segments.append(segment_actions(samples, settings["max_speed"]))
-                region = ollama.region([previous_color, frame])
+                finish_segment()
+                region = (ollama.region([previous_color, frame]) if settings["engine"] != "haven" else
+                          {"active": True, "confidence": 1.0, "roi": [0, 0, 1, 1], "axis": "y"})
                 regions.append({"at": at, **region})
                 last_refresh = at
                 samples = [(at, 0.0)]
             else:
-                samples.append((at, measured_motion(previous, gray, region)))
+                pending.append((at, executor.submit(measure_selected, previous, gray, region, settings)))
+                if len(pending) >= settings["batch_size"]:
+                    drain()
             previous, previous_color = gray, frame
             if index % (stride * 20) == 1 or index == count:
                 progress(min(0.99, index/count))
@@ -308,14 +388,16 @@ def analyze_video(path, settings, ollama, progress=lambda value: None):
             raise ValueError("Video decoding ended substantially before its reported end")
         if last_at < expected_ms * 0.5:
             raise ValueError("Decoded duration is inconsistent with video metadata")
-        segments.append(segment_actions(samples, settings["max_speed"]))
+        finish_segment()
         actions = finalize_actions(segments, settings["max_speed"])
         if not any(r["active"] for r in regions) or max(a["pos"] for a in actions)-min(a["pos"] for a in actions) < 3:
             raise ValueError("No reliable motion was measured; no output file was created")
         return {"version": "1.0", "inverted": False, "range": 100, "actions": actions,
                 "metadata": {"creator": f"Funscript Ollama {VERSION}", "model": settings["model"],
-                             "experimental": True, "regions": regions}}
+                             "experimental": True, "engine": settings["engine"],
+                             "vr": vr, "regions": regions}}
     finally:
+        executor.shutdown(wait=True, cancel_futures=True)
         cap.release()
 
 
@@ -346,7 +428,10 @@ class SceneQueue:
     def __init__(self, stash, settings):
         self.stash, self.settings = stash, settings
 
-    def scenes(self):
+    def scenes(self, all_scenes=False):
+        if all_scenes:
+            return self.stash.find_scenes(f={}, filter={"per_page": -1},
+                                          fragment="id files { path } tags { id name }") or []
         tag = self.stash.find_tag(self.settings["trigger_tag"], create=False)
         if not tag:
             return []
@@ -370,9 +455,71 @@ class SceneQueue:
         self.stash.update_scene({"id": scene_id, "tag_ids": ids})
 
 
+def secondary_scripts(path, script, settings, log):
+    if not settings["multi_axis"]:
+        return 0
+    from haven_motion import MultiAxisGenerator, MULTI_AXIS_CONFIG
+    actions = script.get("actions")
+    if not isinstance(actions, list) or len(actions) < 2:
+        raise ValueError("Multi-axis generation requires at least two valid primary actions")
+    last = -1
+    for action in actions:
+        if (not isinstance(action, dict) or type(action.get("at")) is not int or action["at"] <= last
+                or type(action.get("pos")) not in (int, float) or not math.isfinite(action["pos"])
+                or not 0 <= action["pos"] <= 100):
+            raise ValueError("Primary actions need increasing nonnegative milliseconds and positions in 0..100")
+        last = action["at"]
+    options = {**settings, "multi_axis_intensity": settings["multi_axis_intensity"]/10,
+               "random_speed": settings["random_speed"]/10}
+    axes = MultiAxisGenerator(options).generate_all_axes(actions, settings["analysis_fps"], log.info)
+    count = 0
+    for name, points in axes.items():
+        target = Path(path).with_suffix("." + MULTI_AXIS_CONFIG[name]["file_suffix"] + ".funscript")
+        if target.exists() and not settings["overwrite"]:
+            log.info(f"Existing {name} sidecar preserved")
+            continue
+        points = finalize_actions([points], settings["max_speed"])
+        save_script(target, {"version": "1.0", "inverted": False, "range": 100, "actions": points},
+                    settings["overwrite"])
+        count += 1
+    return count
+
+
+def marker_steps(stash, scene_id, script, settings, log):
+    from chapters import import_chapters, completion_marker
+    if settings["import_chapters"]:
+        count = import_chapters(stash, scene_id, script, settings["marker_tolerance"])
+        log.info(f"Scene {scene_id}: imported {count} new chapter markers")
+    if settings["add_marker"]:
+        completion_marker(stash, scene_id, settings["marker_tolerance"])
+
+
+def import_existing(stash, settings, log, all_scenes=False):
+    from chapters import load_script, import_chapters
+    scenes = SceneQueue(stash, settings).scenes(all_scenes)
+    result = {"scenes": 0, "markers": 0, "failed": 0}
+    # The explicit import task runs independently of the automatic-import switch.
+    for index, scene in enumerate(scenes):
+        try:
+            for item in scene.get("files", []):
+                path = Path(item["path"]).with_suffix(".funscript")
+                if path.is_file():
+                    result["markers"] += import_chapters(stash, scene["id"], load_script(path),
+                                                         settings["marker_tolerance"])
+            result["scenes"] += 1
+        except Exception as exc:
+            result["failed"] += 1
+            log.error(f"Scene {scene['id']}: chapter import failed: {exc}")
+        log.progress((index+1)/len(scenes))
+    log.progress(1)
+    return result
+
+
 def process_queue(stash, settings, log):
-    ollama = Ollama(settings)
-    ollama.check_model()
+    from chapters import load_script, export_chapters
+    ollama = None if settings["engine"] == "haven" else Ollama(settings)
+    if ollama:
+        ollama.check_model()
     queue = SceneQueue(stash, settings)
     scenes = queue.scenes()
     summary = {"created": 0, "skipped": 0, "failed": 0}
@@ -387,13 +534,22 @@ def process_queue(stash, settings, log):
                 raise ValueError("Video path is not accessible inside the Stash runtime")
             output = path.with_suffix(".funscript")
             if output.exists() and not settings["overwrite"]:
+                existing = load_script(output)
+                secondary_scripts(path, existing, settings, log)
+                marker_steps(stash, scene["id"], existing, settings, log)
                 summary["skipped"] += 1
                 log.info(f"Scene {scene['id']}: existing script preserved; queue tag retained")
                 continue
-            log.info(f"Scene {scene['id']}: analyzing video; sampled images go to configured Ollama")
+            log.info(f"Scene {scene['id']}: analyzing video with {settings['engine']} engine")
             script = analyze_video(path, settings, ollama,
-                                   lambda value: log.progress((i+value)/len(scenes)))
+                                   lambda value: log.progress((i+value)/len(scenes)),
+                                   vr=vr_scene(scene, settings))
+            if settings["export_chapters"]:
+                previous = load_script(output) if output.exists() else None
+                export_chapters(stash, scene["id"], script, previous)
             save_script(output, script, settings["overwrite"])
+            secondary_scripts(path, script, settings, log)
+            marker_steps(stash, scene["id"], script, settings, log)
             queue.status(scene["id"], True)
             summary["created"] += 1
             log.info(f"Scene {scene['id']}: script saved ({len(script['actions'])} actions)")
@@ -420,6 +576,10 @@ def run(payload, stash_factory=None, log=None):
     raw = stash.get_configuration(fragment="plugins").get("plugins", {}).get(PLUGIN_ID, {})
     settings = configuration(raw)
     mode = payload.get("args", {}).get("mode", "process_scenes")
+    if mode in ("import_chapters", "import_all_chapters"):
+        summary = import_existing(stash, settings, log, all_scenes=mode == "import_all_chapters")
+        return {"output": f"Scanned: {summary['scenes']}; imported markers: {summary['markers']}; failed: {summary['failed']}",
+                "error": "Some chapter imports failed" if summary["failed"] else None}
     if mode == "test_connection":
         import numpy as np
         import cv2

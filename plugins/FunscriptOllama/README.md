@@ -1,15 +1,58 @@
-# Funscript Ollama (Prototyp 0.1.1)
+# Funscript Ollama (Prototyp 0.2.0)
 
 Eigenständiges Stash-Plugin, inspiriert vom Tag-Ablauf von
 [FunscriptHaven](https://github.com/stashapp/CommunityScripts/tree/main/plugins/FunscriptHaven).
-Es kombiniert **Ollama / `qwen3-vl:8b-instruct`** mit OpenCV und erstellt eine
-einachsige `.funscript`-Datei neben dem Video. Es verändert StashIP-TV nicht.
-Die Implementierung ist neu; der FunscriptHaven-Algorithmus, dessen VR-Verarbeitung
-und dessen zusätzliche Achsen wurden nicht übernommen.
+Es kombiniert **Ollama / `qwen3-vl:8b-instruct`**, die Bewegungsverarbeitung von
+FunscriptHaven und den Kapitelimport von
+[Funscript Markers](https://github.com/stashapp/CommunityScripts/tree/main/plugins/funscriptMarkers).
+Es erstellt eine primäre `.funscript`-Datei und optional fünf zusätzliche Achsen
+neben dem Video. Die lizenzierten Haven-Komponenten und Anpassungen sind in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) dokumentiert.
+
+## Verarbeitungsmodi
+
+Unter **Processing Engine** einen dieser Werte eintragen:
+
+| Wert | Verhalten |
+| --- | --- |
+| `ollama` | Bisheriger Standard: Qwen wählt Bereich/Achse; OpenCV misst die gerichtete Bewegung. |
+| `haven` | Haven-Radialbewegung ohne Ollama. Auch bei ausgeschaltetem Ollama-Server nutzbar. |
+| `ollama_haven` | Qwen wählt den Bereich; darin wird Havens radiale Bewegung ausgewertet. |
+
+**POV Mode** schaltet auch im `ollama`-Modus auf die radiale Messung mit einem
+Ursprung unten in der Mitte des gewählten Bereichs um. **Balance Global Motion**
+nutzt je nach Modus Hintergrundkompensation oder die ursprüngliche Haven-Gewichtung.
+Driftfenster, lokale Normalisierung, Keyframe-Reduktion, Worker-Anzahl und maximale
+Warteschlange sind konfigurierbar. Die wartenden Bildpaare bestimmen den
+Speicherbedarf; das Video wird fortlaufend über OpenCV decodiert. Decord und die
+ursprüngliche Intel-Arc-Decoder-Konfiguration werden nicht übernommen. Deshalb
+sind Ergebnisse und Geschwindigkeit nicht bitgleich mit dem ursprünglichen Plugin.
+
+### VR und zusätzliche Achsen
+
+**Detect VR Tags** erkennt standardmäßig `VR`, `Virtual Reality`, `180°`, `360°`
+ohne Beachtung der Großschreibung. **VR Tags** ist anpassbar. **VR Layout**:
+
+- `haven`: unteres linkes Viertel, wie die ursprüngliche Haven-Vorverarbeitung.
+- `sbs`: linkes Bild eines nebeneinander angeordneten Stereovideos.
+- `tb`: oberes Bild eines übereinander angeordneten Stereovideos.
+- `mono`: kein Zuschnitt, auch bei einem VR-Tag.
+
+Dieser Zuschnitt gilt für Qwen und OpenCV. Es findet keine geometrische Entzerrung
+von 180°-/360°-Projektionen statt.
+
+**Generate Additional Axes** erzeugt `.surge.funscript`, `.sway.funscript`,
+`.twist.funscript`, `.roll.funscript` und `.pitch.funscript`. Wie bei Haven sind
+das **synthetische, an die Hauptbewegung gekoppelte Rauschkurven**, keine aus
+dem Video rekonstruierten 3D-Bewegungen. Intensität, Variationstempo, Smart Limit,
+Auto-Home-Verzögerung und Rückkehrdauer sind einstellbar. Null Sekunden Rückkehrdauer
+bedeutet sofortige Zentrierung. Auch diese Dateien beachten Dateischutz, Backups
+und Positions-/Geschwindigkeitsgrenzen. Bei vorhandener Hauptdatei können fehlende
+zusätzliche Achsen ergänzt werden, ohne die Hauptdatei zu überschreiben.
 
 ## Was Qwen übernimmt
 
-Der voreingestellte Server ist **`http://192.168.178.16:11434`**. Qwen erhält zu
+In den Ollama-Modi ist der voreingestellte Server **`http://192.168.178.16:11434`**. Qwen erhält zu
 Beginn, nach erkannten Schnitten und etwa alle 20 Sekunden zwei verkleinerte
 JPEG-Bilder. Das Modell wählt einen Bildbereich und eine horizontale oder
 vertikale Bewegungsachse. OpenCV misst anschließend die tatsächliche Bewegung
@@ -39,7 +82,7 @@ bleiben bei einem anschließenden Fehler beim Aktualisieren der Stash-Tags erhal
   Plugin-/Abfragevertrag von Stash v0.31.1, noch nicht in einer echten Installation.
 - Python **3.11 oder neuer**, OpenCV und NumPy im selben Container bzw. unter
   demselben Dienstkonto wie Stash; `stashapp-tools` für die Stash-Anbindung.
-- Ollama mit installiertem `qwen3-vl:8b-instruct`. Die
+- Für die Ollama-Modi: Ollama mit installiertem `qwen3-vl:8b-instruct`. Die
   [Modellseite](https://ollama.com/library/qwen3-vl:8b-instruct) nennt mindestens
   Ollama 0.12.7. Auf dem Ollama-Server einmal ausführen:
 
@@ -47,9 +90,9 @@ bleiben bei einem anschließenden Fehler beim Aktualisieren der Stash-Tags erhal
   ollama pull qwen3-vl:8b-instruct
   ```
 
-- Ein lokales Video pro Szene. Mehrere Dateien pro Szene, VR-/Stereobilder,
-  Multi-Axis-Ausgabe und automatische GPU-Auswertung durch OpenCV sind in dieser
-  Version nicht vorgesehen. Ollama kann seine eigene GPU verwenden.
+- Ein lokales Video pro Szene für die Bewegungsanalyse. Der Kapitelimport liest
+  auch mehrere vorhandene primäre Sidecars einer Szene. Automatische
+  GPU-Auswertung durch OpenCV ist nicht vorgesehen; Ollama kann seine eigene GPU verwenden.
 - Decoder-Zeitstempel werden verwendet, wenn verfügbar; andernfalls greift
   die Bildrate. Bei variabler Bildrate ohne zuverlässige Decoder-Zeitstempel
   die Quelldatei vorher in eine konstante Bildrate umwandeln. Codec-Unterstützung
@@ -57,15 +100,19 @@ bleiben bei einem anschließenden Fehler beim Aktualisieren der Stash-Tags erhal
 
 ## Installation über Stash
 
-Nach dem Merge und erfolgreicher Veröffentlichung diese **zusätzliche**
-Plugin-Quelle unter **Einstellungen → Plugins → Quellen** hinzufügen:
+Unter **Einstellungen → Plugins → Quellen** dieselbe Quelle wie für StashIP-TV
+verwenden. Der Index bietet **beide Plugins** an:
 
 ```text
-https://raw.githubusercontent.com/Thietmar1/StashIP-TV/funscript-ollama/index.yml
+https://raw.githubusercontent.com/Thietmar1/StashIP-TV/tvguide-iptv/index.yml
 ```
 
 Quellen aktualisieren, **Funscript Ollama** installieren und die Python-Abhängigkeiten
-wie unten beschrieben einrichten. Die bestehende TV-Quelle bleibt erhalten.
+wie unten beschrieben einrichten. Version 0.2.0 erscheint nach Merge und erfolgreicher
+Veröffentlichung dieses Updates. Die bisherige separate Quelle
+`https://raw.githubusercontent.com/Thietmar1/StashIP-TV/funscript-ollama/index.yml`
+wird aus Kompatibilitätsgründen weiter aktualisiert. Bereits installierte Plugins
+müssen beim Wechsel der Quelle nicht deinstalliert werden; die ID bleibt gleich.
 Alternativ das ZIP nach `<Stash-Konfiguration>/plugins/FunscriptOllama/` entpacken
 und die Plugins neu laden. Die Manifestdatei heißt **FunscriptOllama.yml** und
 bestimmt auch die technische Einstellungs-ID `FunscriptOllama`.
@@ -172,7 +219,8 @@ erreichbar sein; interaktiv verbundene Laufwerksbuchstaben gelten dort oft nicht
 Erfolg entfernt den Queue-Tag und einen früheren Fehler-Tag und setzt
 **FunscriptOllama_Complete**. Fehler lassen den Queue-Tag für einen erneuten
 Versuch stehen und setzen **FunscriptOllama_Error**. Andere Tags bleiben erhalten.
-Bereits vorhandene Skripte werden übersprungen; ihr Queue-Tag bleibt stehen.
+Die Bewegung vorhandener Skripte wird übersprungen; ihr Queue-Tag bleibt stehen.
+Kapitel können dabei importiert und fehlende Zusatzachsen ergänzt werden.
 **Overwrite Existing Funscript** ist standardmäßig aus. Bei aktiviertem
 Überschreiben wird die bisherige Datei vor dem Austausch als
 `Datei.funscript.<Zeitstempel>.bak` gesichert.
@@ -182,6 +230,41 @@ atomaren Austausch bzw. Hardlink. Ext4 und NTFS unterstützen das; Netzlaufwerke
 ohne Hardlink-Unterstützung melden einen Fehler, anstatt eine bestehende Datei
 unbemerkt zu überschreiben. Eine neue Ausgabe ersetzt nicht automatisch den
 Stash-Datenbankstatus, falls dessen anschließende Tag-Aktualisierung fehlschlägt.
+Dateien werden einzeln atomar gespeichert. Falls nach einer Hauptdatei eine
+Zusatzachse oder die Marker-Aktualisierung fehlschlägt, bleibt die bereits
+gespeicherte Ausgabe erhalten. Ein neuer Durchlauf kann fehlende Zusatzachsen
+ergänzen; vorhandene Dateien werden ohne aktiviertes Überschreiben erhalten.
+
+## Kapitel und Stash-Marker
+
+Die Funktionen von Funscript Markers sind in folgenden Aufgaben enthalten:
+
+- **Import Chapters From Tagged Scenes:** primäre Sidecars der mit dem Queue-Tag
+  markierten Szenen lesen. Keine Videos auswerten und keine Skripte verändern.
+- **Import Chapters From All Scenes:** die Dateipfade aller Szenen nach primären
+  `.funscript`-Dateien durchsuchen. Funktioniert auch, bevor Stash die neue Datei
+  als interaktiv markiert hat. Bei großen Bibliotheken entsprechend aufwendiger.
+
+Diese Aufgaben benötigen **keinen Ollama-Server**. Sie lesen
+`metadata.chapters` mit `name`, `startTime` und optional `endTime`. Unterstützt
+werden Sekunden oder `HH:MM:SS.mmm`, einschließlich Kapitel bei Sekunde null.
+Leere Kapitelnamen werden wie beim Vorbild zu `#`. Ungültige Kapitel stoppen den
+Import dieser Datei, bevor Marker daraus angelegt werden. Bereits importierte
+Dateien können gefahrlos erneut eingelesen werden: passende Titel/Tags innerhalb
+der **Marker Duplicate Tolerance Seconds** werden übersprungen. Manuelle Marker
+werden weder gelöscht noch verändert. Neue Kapitel können neue Stash-Tags anlegen.
+
+**Automatically Import Chapter Markers** aktiviert denselben Ablauf nach der
+Skripterzeugung und beim Erhalten einer vorhandenen Hauptdatei. Die ausdrücklichen
+Import-Aufgaben funktionieren unabhängig von diesem Automatik-Schalter.
+**Export Stash Markers As Chapters** übernimmt vorhandene Stash-Marker in neue
+primäre Skripte und erhält beim Überschreiben vorhandene Sidecar-Kapitel.
+**Add Completion Marker** ergänzt optional `Funscript Generated` bei Sekunde null
+mit dem Tag `Funscript`, ohne diesen Marker doppelt anzulegen.
+
+Das Plugin erfindet keine Kapitelbezeichnungen aus Modellantworten. Ohne bereits
+vorhandene Kapitel oder Stash-Marker gibt es keine inhaltlichen Kapitel zu
+importieren/exportieren; der optionale Abschlussmarker ist davon unabhängig.
 
 ## Einstellungen
 
@@ -192,6 +275,33 @@ Stash-Datenbankstatus, falls dessen anschließende Tag-Aktualisierung fehlschlä
 | Ollama Request Timeout Seconds | 600 | Einschließlich Modellladezeit; 10–1800 |
 | Maximum Position Change Per Second | 150 | Begrenzung für Werte von 0–100; 10–500 |
 | Overwrite Existing Funscript | aus | Vor Überschreiben immer Sicherung erstellen |
+| Processing Engine | `ollama` | `ollama`, `haven` oder `ollama_haven` |
+| Motion Worker Threads | 2 | Parallele optische Messungen; 1–32 |
+| Maximum Queued Frame Pairs | 32 | Maximale wartende Bildpaare; 1–3000 |
+| Detrend Window Seconds | 2 | Driftbereinigung; 1–10 |
+| Normalization Window Seconds | 4 | Lokale Bereichskalibrierung; 1–10 |
+| Reduce Keyframes | an | Aus schalten für alle gemessenen Punkte |
+| POV Mode | aus | Radialmessung vom unteren Mittelpunkt |
+| Balance Global Motion | an | Modusabhängige Kamerakompensation/Gewichtung |
+| Detect VR Tags | an | Tag-basierte VR-Erkennung |
+| VR Tags | `VR,Virtual Reality,180°,360°` | Kommagetrennte Tag-Namen |
+| VR Layout | `haven` | `haven`, `sbs`, `tb`, `mono` |
+| Generate Additional Axes | aus | Surge, Sway, Twist, Roll, Pitch |
+| Additional Axis Intensity | 5 | 0–10 |
+| Additional Axis Variation Speed | 3 | 0–10 |
+| Limit Additional Axes By Activity | an | Haven Smart Limit |
+| Auto Home Delay Seconds | 1 | 0–10 |
+| Auto Home Duration Seconds | 1 | 0–10; null bedeutet sofort |
+| Automatically Import Chapter Markers | an | Kapitel in Stash übernehmen |
+| Export Stash Markers As Chapters | an | Stash-Marker in neue Skripte übernehmen |
+| Marker Duplicate Tolerance Seconds | 0.25 | Zeitabstand für passende Titel/Tags; 0–15 |
+| Add Completion Marker | aus | Abschlussmarker bei Sekunde null |
+
+Der **Timeout ist pro Installation in Stash einstellbar**, unter
+**Einstellungen → Plugins → Funscript Ollama → Ollama Request Timeout Seconds**.
+600 Sekunden sind ausschließlich der Standard für ein leeres Feld. Ein bereits
+gespeicherter eigener Wert wird durch das Update nicht ersetzt. Der Verbindungstest
+und beide Ollama-Verarbeitungsmodi verwenden diesen Wert für ihre HTTP-Anfragen.
 
 Niedrige Bildraten erfassen schnelle Bewegung schlechter. Häufigere Qwen-Anfragen
 erhöhen die Laufzeit und die übertragene Bildmenge. Es wird jeweils eine Szene
@@ -211,11 +321,13 @@ nicht durch dieses Stash-Plugin. Den aktuellen Modellstatus zeigt Ollamas `/api/
 python -m pip install -r plugins/FunscriptOllama/requirements.txt
 python -m unittest discover -s plugins/FunscriptOllama/tests -v
 python tools/package_funscript_ollama.py --output-dir dist/funscript-ollama --revision local --check
+python tools/package_catalog.py --output-dir dist/catalog --revision local --check
 ```
 
 Tests prüfen den echten lokalen HTTP-Transport mit einem Ollama-Testserver,
 JSON-Validierung, optische Messung an einem synthetischen Video, Dateischutz,
-Grenzwerte und den Stash-Tag-Ablauf mit einem Test-Client. Sie führen keine
+Grenzwerte, VR-/POV-Verarbeitung, Zusatzachsen, Kapitelimport und den Stash-Tag-Ablauf
+mit einem Test-Client. Sie führen keine
 Inferenz mit einem echten Qwen-Modell aus. Zusätzlich wurde der Vision-/JSON-Aufruf
 am 16.10.2026 mit zwei künstlichen Bildern gegen den angegebenen Ollama-Server
 geprüft: Ollama 0.34.0, Modell vorhanden, gültige strukturierte Antwort nach etwa
@@ -225,6 +337,6 @@ Die GitHub-Matrix verwendet Linux/Windows und Python 3.11/3.13. Ein End-to-End-T
 in deinem Stash-Container mit echtem Videomaterial und eine manuelle
 Qualitätsprüfung stehen noch aus.
 
-Lizenz: AGPL-3.0, siehe beiliegende LICENCE. FunscriptHaven ist die Referenz für
-den Bedienablauf; OpenCV, NumPy und stashapp-tools werden separat installiert
-und behalten ihre jeweiligen Lizenzen.
+Lizenz: AGPL-3.0, siehe beiliegende LICENCE und THIRD-PARTY-NOTICES.md für die
+adaptierten Haven-Komponenten. OpenCV, NumPy und stashapp-tools werden separat
+installiert und behalten ihre jeweiligen Lizenzen.
