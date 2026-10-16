@@ -5,10 +5,10 @@ coverage/
 /.verification/
 /dist/
 
-# Build output -- generated from plugins/TVGuide/src by esbuild
-plugins/TVGuide/tvguide.js
-plugins/TVGuide/tvguide.css
-plugins/TVGuide/tvguide-server.js
+# Build output -- generated from plugins/StashIP-TV/src by esbuild
+plugins/StashIP-TV/tvguide.js
+plugins/StashIP-TV/tvguide.css
+plugins/StashIP-TV/tvguide-server.js
 
 # Editor swap/backup files
 *.swp
@@ -20,4 +20,4 @@ plugins/TVGuide/tvguide-server.js
 **/docs/superpowers/
 
 # Personal scratch list, not a project artifact
-plugins/TVGuide/TODO.txt
+plugins/StashIP-TV/TODO.txt

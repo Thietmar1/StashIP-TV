@@ -1,0 +1,1587 @@
+/*
+ * StashIP-TV styles.
+ *
+ * Colours come from custom properties so the guide follows Stash's own light
+ * and dark themes rather than hard-coding one. Grid geometry is entirely
+ * percentage-based -- the layout maths lives in domain/layout.js and this file
+ * only consumes the results.
+ */
+
+.tvguide-overlay {
+    --tvguide-bg: #14171a;
+    --tvguide-surface: #1e2328;
+    --tvguide-surface-2: #262d34;
+    --tvguide-text: #e9edf1;
+    --tvguide-text-dim: #9aa7b2;
+    --tvguide-accent: #3f9dff;
+    --tvguide-live: #e5484d;
+    --tvguide-border: #333c45;
+    --tvguide-row-height: 76px;
+    --tvguide-head-width: 200px;
+    --tvguide-player-width: 268px;
+    --tvguide-banner-art-width: 160px;
+    /* Everything in the player panel that is not the 16:9 picture: the progress
+       bar, the two text lines, the gaps, and the header's own padding. */
+    --tvguide-player-chrome: 86px;
+
+    position: fixed;
+    inset: 0;
+    z-index: 1500;
+    display: flex;
+    flex-direction: column;
+    background: var(--tvguide-bg);
+    color: var(--tvguide-text);
+    font-size: 14px;
+    overflow: hidden;
+    /* Backstop: nothing inside should ever scroll the overlay sideways. */
+    overflow-x: hidden;
+}
+
+@media (prefers-color-scheme: light) {
+    .tvguide-overlay {
+        --tvguide-bg: #f4f6f8;
+        --tvguide-surface: #ffffff;
+        --tvguide-surface-2: #eef1f4;
+        --tvguide-text: #16191c;
+        --tvguide-text-dim: #5c6670;
+        --tvguide-border: #d5dbe1;
+    }
+}
+
+/* position:fixed, not just overflow:hidden -- iOS Safari ignores the latter and
+   lets the page behind the overlay keep scrolling. `top` is set from JS and the
+   scroll position restored on close. */
+body.stash-tvguide-active {
+    position: fixed;
+    width: 100%;
+    overflow: hidden;
+}
+
+.tvguide-sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* ---------- header: detail banner + corner viewer ---------- */
+
+.tvguide-header {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 12px 16px;
+    background: var(--tvguide-surface);
+    border-bottom: 1px solid var(--tvguide-border);
+    /* `flex: 0 0` matters as much as the height: with the default shrink factor
+       the stage below squashed this to almost nothing, taking the player with
+       it. A height that does not depend on the content is what stops hovering
+       scenes with different posters and description lengths from reflowing the
+       page -- so it is derived from the player's width instead, and changes
+       only when the player is deliberately resized. */
+    flex: 0 0 auto;
+    height: max(
+        236px,
+        calc(var(--tvguide-player-width) * 0.5625 + var(--tvguide-player-chrome))
+    );
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.tvguide-banner {
+    display: flex;
+    gap: 14px;
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+    overflow: hidden;
+}
+
+.tvguide-banner-art {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    width: var(--tvguide-banner-art-width);
+    min-width: 0;
+    height: 100%;
+}
+
+.tvguide-banner-logo-button {
+    min-height: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    background: none !important;
+    cursor: pointer;
+}
+
+/* The studio mark belongs to the poster column, so use the same full width
+   whether the channel can open in Stash (a button) or is a plain badge. */
+.tvguide-banner-logo {
+    align-self: stretch;
+    width: 100%;
+}
+
+.tvguide-banner-logo .tvguide-logo {
+    width: 100%;
+}
+
+.tvguide-banner-body { min-width: 0; }
+
+.tvguide-banner-heading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.tvguide-banner-title {
+    margin: 0;
+    font-size: 20px;
+    line-height: 1.25;
+}
+
+.tvguide-banner-meta,
+.tvguide-banner-details {
+    margin: 4px 0 0;
+    color: var(--tvguide-text-dim);
+}
+
+.tvguide-related {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.tvguide-related-label {
+    flex: 0 0 auto;
+    color: var(--tvguide-text-dim);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.tvguide-related-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.tvguide-related-chip,
+.tvguide-save-channel {
+    min-height: 0 !important;
+    padding: 3px 7px !important;
+    border: 1px solid var(--tvguide-border) !important;
+    border-radius: 999px;
+    background: var(--tvguide-surface-2) !important;
+    color: var(--tvguide-text);
+    font-size: 12px;
+}
+
+.tvguide-save-channel { margin-top: 10px; }
+
+.tvguide-watch {
+    flex: 0 0 auto;
+    align-self: stretch;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.tvguide-banner-body {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.tvguide-banner-empty { color: var(--tvguide-text-dim); }
+.tvguide-banner-extra[hidden], .tvguide-show-more[hidden] { display: none; }
+.tvguide-show-more { align-self: flex-start; margin-top: 8px; }
+
+.tvguide-live-badge {
+    padding: 2px 7px;
+    border-radius: 3px;
+    background: var(--tvguide-live);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+}
+
+.tvguide-viewer {
+    flex: 0 0 300px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.tvguide-viewer-video {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: #000;
+    border-radius: 6px;
+    object-fit: cover;
+}
+
+.tvguide-viewer-controls {
+    display: flex;
+    gap: 8px;
+}
+
+.tvguide-viewer-caption {
+    margin: 0;
+    color: var(--tvguide-text-dim);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tvguide-close {
+    width: 40px;
+    height: 40px;
+    font-size: 22px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    flex-shrink: 0;
+}
+.tvguide-close svg { display: block; width: 32px; height: 32px; }
+
+/* ---------- toolbar ---------- */
+
+.tvguide-topbar {
+    /* `flex: 0 0 auto` is load-bearing. This is a flex item in a column whose
+       sibling grows with the channel count, and its own children scroll -- so
+       with the default shrink factor it was squeezed toward nothing as soon as
+       a group was expanded. */
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 6px 10px;
+    border-top: 1px solid var(--tvguide-border);
+    border-bottom: 1px solid var(--tvguide-border);
+    background: var(--tvguide-surface);
+    position: relative;
+}
+
+.tvguide-topbar .tvguide-close {
+    margin-left: 4px;
+    flex: 0 0 auto;
+}
+.tvguide-toolbar-right {
+    position: relative;
+    display: flex;
+    flex: 0 1 auto;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    margin-left: auto;
+}
+.tvguide-recent-panel {
+    position: absolute;
+    z-index: 5;
+    top: 100%;
+    right: 0;
+    min-width: 300px;
+    max-height: 50vh;
+    max-height: 50dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 6px;
+    border: 1px solid var(--tvguide-border);
+    background: var(--tvguide-surface);
+    box-shadow: 0 6px 18px rgba(0,0,0,.35);
+}
+.tvguide-recent-row { display: grid; grid-template-columns: 32px minmax(90px, 1fr) minmax(120px, 2fr); align-items: center; gap: 8px; width: 100%; text-align: left; }
+.tvguide-recent-row .tvguide-logo { width: 28px; height: 28px; }
+.tvguide-recent-name, .tvguide-recent-now { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The chips select a grouping; everything after them acts on the guide. Without
+   a rule between them, "Current" read as one more grouping -- and a border on
+   the button itself cannot say that, because every button already has one. */
+.tvguide-toolbar-divider {
+    flex: 0 0 auto;
+    align-self: stretch;
+    width: 1px;
+    margin: 2px 4px;
+    background: var(--tvguide-border);
+}
+
+.tvguide-status {
+    margin-left: auto;
+    /* Without this a long status string cannot shrink and pushes the toolbar
+       wider than the viewport. */
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--tvguide-text-dim);
+    font-size: 12px;
+}
+.tvguide-toolbar-right .tvguide-status { margin-left: 0; }
+
+.tvguide-overlay button {
+    min-height: 32px;
+    padding: 4px 12px;
+    border: 1px solid var(--tvguide-border);
+    border-radius: 4px;
+    background: var(--tvguide-surface-2);
+    color: var(--tvguide-text);
+    cursor: pointer;
+}
+
+@media (hover: hover) {
+    .tvguide-overlay button:hover { border-color: var(--tvguide-accent); }
+}
+
+/* A visible focus ring is the whole basis of keyboard operation here. */
+.tvguide-overlay :focus-visible {
+    outline: 2px solid var(--tvguide-accent);
+    outline-offset: 2px;
+}
+
+/* ---------- channel badge ---------- */
+
+.tvguide-logo {
+    flex: 0 0 auto;
+    width: 44px;
+    height: 44px;
+    border-radius: 4px;
+    object-fit: contain;
+    background: var(--tvguide-surface-2);
+}
+
+.tvguide-logo-monogram {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: hsl(var(--tvguide-logo-hue, 210) 45% 32%);
+    color: #fff;
+    font-weight: 700;
+    font-size: 15px;
+}
+
+/* In a channel row the badge *is* the channel: it should fill the cell and sit
+   on the row's own background, not float in a grey square of its own. */
+.tvguide-row-head .tvguide-logo-button {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+}
+
+.tvguide-row-head .tvguide-logo {
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    background: none;
+}
+
+/* ---------- grid ---------- */
+
+.tvguide-stage {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.tvguide-grid {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.tvguide-grid-head {
+    flex: 0 0 auto;
+    display: flex;
+    border-bottom: 1px solid var(--tvguide-border);
+}
+
+.tvguide-grid-corner {
+    position: relative;
+    flex: 0 0 var(--tvguide-head-width);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--tvguide-text-dim);
+    font-size: 12px;
+}
+
+.tvguide-ticks {
+    position: relative;
+    flex: 1 1 auto;
+    height: 26px;
+    border-bottom: 1px solid var(--tvguide-border);
+}
+
+/* A tick label sits over its own boundary line. */
+.tvguide-tick::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    bottom: -6px;
+    width: 1px;
+    height: 6px;
+    background: var(--tvguide-border);
+}
+
+.tvguide-tick {
+    position: absolute;
+    top: 5px;
+    transform: translateX(-50%);
+    color: var(--tvguide-text-dim);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.tvguide-grid-scroll {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    /* Vertical panning only; time is panned with the toolbar or the keyboard,
+       so the browser never has to guess which axis a drag meant. */
+    touch-action: pan-y;
+}
+
+/* The track overlay starts where the channel column ends, so a percentage
+   inside it is a percentage of the track -- which is what the now-line and the
+   gridlines are computed against. Positioning them against the whole scroll
+   container and adding a margin put the line progressively too far right. */
+.tvguide-grid-inner {
+    position: relative;
+    min-height: 100%;
+}
+
+.tvguide-track-overlay {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: var(--tvguide-head-width);
+    right: 0;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.tvguide-gridline {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--tvguide-border);
+    opacity: 0.25;
+}
+
+.tvguide-nowline {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--tvguide-live);
+    z-index: 2;
+}
+
+.tvguide-row {
+    display: flex;
+    height: var(--tvguide-row-height);
+    border-bottom: 1px solid var(--tvguide-border);
+}
+
+.tvguide-row-tuned { background: rgba(63, 157, 255, 0.07); }
+
+.tvguide-row-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 0 0 var(--tvguide-head-width);
+    padding: 0 12px;
+    border-right: 1px solid var(--tvguide-border);
+    overflow: hidden;
+}
+
+.tvguide-row-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    background: none !important;
+    color: inherit;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.tvguide-row-track {
+    position: relative;
+    flex: 1 1 auto;
+}
+
+.tvguide-block {
+    position: absolute;
+    /* Keep each block's rendered size equal to its time-scaled width. */
+    box-sizing: border-box;
+    top: 4px;
+    bottom: 4px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding: 6px 8px;
+    border: 1px solid var(--tvguide-border);
+    border-radius: 4px;
+    background: var(--tvguide-surface);
+    overflow: hidden;
+    cursor: pointer;
+}
+
+.tvguide-block-live { border-color: var(--tvguide-live); }
+.tvguide-logo-button-with-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tvguide-row-head .tvguide-logo-button-with-name .tvguide-logo { flex: 0 0 44px; width: 44px; height: 44px; border-radius: 4px; }
+.tvguide-logo-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tvguide-banner-logo-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tvguide-block-divider { position: absolute; top: 4px; bottom: 4px; width: 1px; background: var(--tvguide-accent); opacity: 0.65; pointer-events: none; }
+.tvguide-block-focused { background: var(--tvguide-surface-2); border-color: var(--tvguide-accent); }
+
+/* A clipped edge means the programme continues past the window rather than
+   starting or ending there. */
+.tvguide-block-clip-start { border-left-style: dashed; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.tvguide-block-clip-end { border-right-style: dashed; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+
+.tvguide-block-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tvguide-block-time {
+    color: var(--tvguide-text-dim);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+.tvguide-row-empty {
+    padding: 8px 12px;
+    color: var(--tvguide-text-dim);
+}
+
+.tvguide-row-skeleton,
+.tvguide-list-skeleton {
+    display: block;
+    height: 16px;
+    margin: 12px;
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--tvguide-surface) 25%, var(--tvguide-surface-2) 50%, var(--tvguide-surface) 75%);
+    background-size: 200% 100%;
+    animation: tvguide-shimmer 1.4s linear infinite;
+}
+
+@keyframes tvguide-shimmer {
+    to { background-position: -200% 0; }
+}
+
+/* ---------- progress ---------- */
+
+.tvguide-progress {
+    display: block;
+    height: 4px;
+    margin-top: 8px;
+    border-radius: 2px;
+    background: var(--tvguide-surface-2);
+    overflow: hidden;
+}
+
+.tvguide-progress-fill {
+    display: block;
+    height: 100%;
+    background: var(--tvguide-accent);
+}
+
+/* ---------- mobile list ---------- */
+
+.tvguide-list {
+    position: relative;
+    height: 100%;
+    overflow-y: auto;
+    /* Never hijack the page scroll on a phone. */
+    touch-action: pan-y;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+}
+
+.tvguide-list-top[hidden] { display: none; }
+
+.tvguide-list-item {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--tvguide-border);
+}
+
+.tvguide-list-item-tuned { background: rgba(63, 157, 255, 0.08); }
+
+.tvguide-list-button {
+    flex: 1 1 auto;
+    display: block;
+    min-width: 0;
+    text-align: left;
+    background: none;
+    border: none;
+}
+
+.tvguide-list-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.tvguide-list-channel { font-weight: 600; }
+
+.tvguide-list-body { display: block; margin-top: 6px; }
+.tvguide-list-now { display: block; }
+
+.tvguide-list-details,
+.tvguide-list-times,
+.tvguide-list-empty {
+    display: block;
+    margin-top: 4px;
+    color: var(--tvguide-text-dim);
+    font-size: 12px;
+}
+
+.tvguide-list-details {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.tvguide-list-expand { flex: 0 0 auto; align-self: center; }
+
+/* ---------- help ---------- */
+
+.tvguide-help {
+    position: absolute;
+    right: 16px;
+    bottom: 16px;
+    max-width: 360px;
+    padding: 16px;
+    border: 1px solid var(--tvguide-border);
+    border-radius: 8px;
+    background: var(--tvguide-surface);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+
+.tvguide-help h2 { margin: 0 0 10px; font-size: 15px; }
+.tvguide-help dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; }
+.tvguide-help dt { font-weight: 700; white-space: nowrap; }
+.tvguide-help dd { margin: 0; color: var(--tvguide-text-dim); }
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 767px), (max-height: 500px) and (pointer: coarse) {
+    .tvguide-topbar {
+        flex-wrap: wrap;
+    }
+
+    /* Close first, so it is at the very top rather than below the details. */
+    .tvguide-topbar .tvguide-close {
+        order: -1;
+        margin-left: auto;
+    }
+
+    .tvguide-header {
+        height: auto;
+        flex-direction: column;
+        /* The viewer stays put while the list scrolls under it. */
+        position: sticky;
+        top: 0;
+        z-index: 3;
+        padding: 12px;
+    }
+
+    .tvguide-viewer { flex: 0 0 auto; order: -1; }
+
+    /* Comfortable touch targets. */
+    .tvguide-overlay button { min-height: 44px; }
+    .tvguide-close { width: 44px; height: 44px; }
+
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tvguide-row-skeleton,
+    .tvguide-list-skeleton {
+        animation: none;
+    }
+
+    .tvguide-overlay * {
+        transition: none !important;
+    }
+}
+
+/* ---------- channel manager ---------- */
+
+.tvguide-manager {
+    position: absolute;
+    inset: 64px 24px 24px;
+    z-index: 4;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--tvguide-border);
+    border-radius: 8px;
+    background: var(--tvguide-surface);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+}
+
+.tvguide-manager[hidden] { display: none; }
+
+.tvguide-manager-head {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 56px 14px 16px;
+    border-bottom: 1px solid var(--tvguide-border);
+    flex-wrap: wrap;
+}
+
+.tvguide-manager-title { margin: 0; font-size: 17px; }
+
+.tvguide-manager-tools {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+}
+
+.tvguide-manager-search {
+    min-width: 200px;
+    padding: 6px 10px;
+    border: 1px solid var(--tvguide-border);
+    border-radius: 4px;
+    background: var(--tvguide-bg);
+    color: var(--tvguide-text);
+}
+
+.tvguide-manager-sort,
+.tvguide-manager-threshold,
+.tvguide-manager-editor input {
+    padding: 5px 8px;
+    border: 1px solid var(--tvguide-border);
+    border-radius: 4px;
+    background: var(--tvguide-bg);
+    color: var(--tvguide-text);
+}
+
+.tvguide-manager-threshold { width: 72px; }
+
+.tvguide-manager-close {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    width: 32px;
+    height: 32px;
+    font-size: 20px;
+    line-height: 1;
+}
+
+.tvguide-manager-status {
+    margin: 0;
+    padding: 8px 16px;
+    color: var(--tvguide-text-dim);
+    font-size: 12px;
+    border-bottom: 1px solid var(--tvguide-border);
+}
+
+.tvguide-manager-sections {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    /* No top padding: a `position: sticky; top: 0` header sticks to the padding
+       box, so any padding here becomes a strip that rows scroll through above
+       the heading. */
+    padding: 0 16px 16px;
+    touch-action: pan-y;
+}
+
+.tvguide-manager-section { margin-top: 0; }
+
+.tvguide-manager-section-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 0;
+    background: var(--tvguide-surface);
+    border-bottom: 1px solid var(--tvguide-border);
+    flex-wrap: wrap;
+}
+
+.tvguide-manager-section-head h3 { margin: 0; font-size: 14px; }
+
+.tvguide-manager-rule {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    color: var(--tvguide-text-dim);
+    font-size: 12px;
+}
+
+.tvguide-manager-list { margin: 0; padding: 0; list-style: none; }
+
+.tvguide-manager-row { border-bottom: 1px solid var(--tvguide-border); }
+
+.tvguide-manager-row-main {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+}
+
+/* A channel outside the guide is visually distinct, while its controls remain
+   fully available -- especially the Add button. */
+.tvguide-manager-row:not(.is-included) .tvguide-manager-row-text { opacity: 0.5; }
+.tvguide-manager-row.is-hidden .tvguide-manager-row-name { text-decoration: line-through; }
+.tvguide-manager-row.is-pinned .tvguide-manager-row-name::before {
+    content: '★ ';
+    color: var(--tvguide-accent);
+}
+
+.tvguide-manager-row-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.tvguide-manager-row-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: inherit;
+}
+
+a.tvguide-manager-row-name:hover { color: var(--tvguide-accent); }
+.tvguide-manager-row-meta { color: var(--tvguide-text-dim); font-size: 12px; }
+
+.tvguide-manager-row-actions {
+    display: flex;
+    gap: 6px;
+    flex: 0 0 auto;
+}
+
+.tvguide-manager-toggle[aria-pressed='true'] {
+    border-color: var(--tvguide-accent);
+    color: var(--tvguide-accent);
+}
+
+.tvguide-manager-toggle[disabled] { opacity: 0.4; cursor: not-allowed; }
+
+.tvguide-manager-editor {
+    display: flex;
+    gap: 16px;
+    padding: 4px 0 12px 56px;
+    flex-wrap: wrap;
+}
+
+.tvguide-manager-field { display: flex; flex-direction: column; gap: 4px; }
+.tvguide-manager-field label { color: var(--tvguide-text-dim); font-size: 12px; }
+
+.tvguide-manager-empty {
+    margin: 8px 0;
+    color: var(--tvguide-text-dim);
+    font-size: 12px;
+}
+
+@media (max-width: 767px), (max-height: 500px) and (pointer: coarse) {
+    .tvguide-manager { inset: 8px; }
+    .tvguide-manager-row-main { flex-wrap: wrap; }
+    .tvguide-manager-row-actions { width: 100%; }
+    .tvguide-manager-editor { padding-left: 0; }
+}
+
+/* ---------- guide chrome: type bar, rail, groups ---------- */
+
+/* Part of the toolbar now, not a bar of its own. */
+.tvguide-typebar {
+    display: flex;
+    flex: 0 1 auto;
+    gap: 6px;
+    min-width: 0;
+    overflow-x: auto;
+    touch-action: pan-x;
+}
+
+.tvguide-typebar[hidden] { display: none; }
+
+.tvguide-type-select {
+    max-width: 180px;
+    min-width: 0;
+    padding: 6px 8px;
+    border: 1px solid var(--tvguide-border);
+    border-radius: 4px;
+    background: var(--tvguide-surface-2);
+    color: var(--tvguide-text);
+    font: inherit;
+}
+
+.tvguide-type-select:focus-visible { outline: 2px solid var(--tvguide-accent); }
+
+.tvguide-searchbox {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1 1 200px;
+    min-width: 140px;
+    max-width: 320px;
+    padding: 0 8px;
+    border: 1px solid var(--tvguide-border);
+    border-radius: 4px;
+    background: var(--tvguide-surface-2);
+}
+
+.tvguide-searchbox:focus-within { border-color: var(--tvguide-accent); }
+
+.tvguide-search-icon {
+    display: inline-flex;
+    flex: 0 0 auto;
+    color: var(--tvguide-text-dim);
+}
+
+.tvguide-search-clear {
+    flex: 0 0 auto;
+    min-height: 0 !important;
+    padding: 0 4px !important;
+    border: none !important;
+    background: none !important;
+    color: var(--tvguide-text-dim);
+    font-size: 16px;
+    line-height: 1;
+}
+
+.tvguide-search-clear[hidden] { display: none; }
+
+.tvguide-search {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 5px 0;
+    border: none;
+    background: none;
+    color: var(--tvguide-text);
+}
+
+.tvguide-time-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tvguide-time-controls[hidden] { display: none; }
+
+/* A-Z rail, pinned to the left of the channel column. */
+.tvguide-grid-main {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.tvguide-grid-main .tvguide-grid-scroll { flex: 1 1 auto; }
+
+.tvguide-rail {
+    flex: 0 0 22px;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    /* Scrollable and top-aligned: spreading the letters over a fixed height
+       with `overflow: hidden` simply cut the tail of the alphabet off. */
+    justify-content: flex-start;
+    padding: 4px 0;
+    border-right: 1px solid var(--tvguide-border);
+    background: var(--tvguide-surface);
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+}
+
+.tvguide-rail::-webkit-scrollbar { display: none; }
+
+.tvguide-rail-letter {
+    flex: 0 0 auto;
+    min-height: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    background: none !important;
+    color: var(--tvguide-text-dim);
+    font-size: 10px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.tvguide-rail-letter:hover { color: var(--tvguide-accent); }
+
+.tvguide-group {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: var(--tvguide-surface-2);
+    border-bottom: 1px solid var(--tvguide-border);
+}
+
+.tvguide-group-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    border: none !important;
+    border-radius: 0 !important;
+    background: none !important;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.tvguide-group-count { color: var(--tvguide-text-dim); font-weight: 400; }
+
+.tvguide-grid-empty,
+.tvguide-list-empty {
+    padding: 24px 16px;
+    margin: 0;
+    color: var(--tvguide-text-dim);
+}
+
+/* ---------- rows ---------- */
+
+
+
+.tvguide-pin,
+.tvguide-logo-button {
+    flex: 0 0 auto;
+    min-height: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    background: none !important;
+    cursor: pointer;
+}
+
+.tvguide-pin { font-size: 14px; color: var(--tvguide-text-dim); }
+.tvguide-pin[aria-pressed='true'] { color: var(--tvguide-accent); }
+
+.tvguide-row-pinned { cursor: grab; }
+
+/* ---------- player ---------- */
+
+.tvguide-player {
+    position: relative;
+    flex: 0 0 var(--tvguide-player-width);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    height: 100%;
+    min-width: 0;
+}
+
+.tvguide-player-picture {
+    position: relative;
+    flex: 0 0 auto;
+    min-width: 0;
+}
+
+/* Bottom left is the only free corner: the picture is anchored to the top right
+   of the header, so that is the one that can move. */
+.tvguide-player-resizer {
+    position: absolute;
+    left: -3px;
+    bottom: -3px;
+    z-index: 2;
+    width: 18px;
+    height: 18px;
+    cursor: nesw-resize;
+    touch-action: none;
+    background: transparent;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.tvguide-player-resizer::after {
+    content: '';
+    position: absolute;
+    bottom: 4px;
+    left: 4px;
+    width: 8px;
+    height: 8px;
+    border-bottom: 2px solid #9cabc0;
+    border-left: 2px solid #9cabc0;
+    border-bottom-left-radius: 3px;
+}
+.tvguide-player-resizer:hover::after { border-color: #fff; }
+
+.tvguide-player-picture.is-editing > .tvguide-player-resizer,
+.tvguide-player-resizer:focus-visible { opacity: 1; pointer-events: auto; }
+
+/* Full width in both, so there is no width left to drag. */
+.tvguide-overlay.is-theater .tvguide-player-resizer,
+.tvguide-player[data-mode='fullscreen'] .tvguide-player-resizer {
+    display: none;
+}
+
+.tvguide-player[hidden] { display: none; }
+
+.tvguide-player-stage {
+    position: relative;
+    background: #000;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.tvguide-player-stage:focus-visible {
+    outline: 2px solid #68b5ff;
+    outline-offset: 2px;
+}
+
+.tvguide-channel-info {
+    position: absolute;
+    width: var(--tvguide-info-width, auto);
+    height: var(--tvguide-info-height, auto);
+    max-height: calc(100% - max(56px, env(safe-area-inset-bottom)) - 24px);
+    overflow: hidden;
+    /* Leave room for the playback controls along the bottom edge. */
+    bottom: max(56px, env(safe-area-inset-bottom));
+    left: max(24px, env(safe-area-inset-left));
+    z-index: 5;
+    max-width: calc(100% - 48px);
+    box-sizing: border-box;
+    padding: 16px 52px 16px 22px;
+    border-left: 4px solid #68b5ff;
+    border-radius: 6px;
+    background: rgba(8, 14, 24, .88);
+    color: #fff;
+    pointer-events: auto;
+    overflow-wrap: anywhere;
+}
+
+.tvguide-channel-info[hidden] { display: none; }
+.tvguide-playback-error {
+    position: absolute;
+    inset: 16px 16px auto;
+    z-index: 6;
+    padding: 12px;
+    border-radius: 6px;
+    background: rgba(8, 14, 24, .9);
+    color: #fff;
+    pointer-events: none;
+}
+.tvguide-playback-error[hidden] { display: none; }
+.tvguide-channel-info .tvguide-channel-info-resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 18px;
+    height: 18px;
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    cursor: nesw-resize;
+    touch-action: none;
+}
+.tvguide-channel-info-resizer::after {
+    content: '';
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 8px;
+    height: 8px;
+    border-top: 2px solid #9cabc0;
+    border-right: 2px solid #9cabc0;
+    border-top-right-radius: 3px;
+}
+.tvguide-channel-info-resizer:hover::after { border-color: #fff; }
+.tvguide-channel-info-resizer:focus-visible { outline: 2px solid #68b5ff; outline-offset: -2px; }
+.tvguide-channel-info.is-minimized { width: auto; height: auto; }
+.tvguide-channel-info.is-minimized .tvguide-channel-info-resizer { display: none; }
+.tvguide-channel-info-heading { display: flex; align-items: center; gap: 14px; }
+.tvguide-channel-info-name { min-width: 0; }
+.tvguide-channel-info .tvguide-channel-info-toggle {
+    position: absolute;
+    top: 22px;
+    right: 12px;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    margin-left: auto;
+    min-width: 24px;
+    min-height: 24px;
+    width: 24px;
+    height: 24px;
+    box-sizing: border-box;
+    padding: 0;
+    color: #fff;
+    background: rgba(255, 255, 255, .12);
+    border: 1px solid rgba(255, 255, 255, .3);
+    border-radius: 4px;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+}
+.tvguide-channel-info-toggle:focus-visible { outline: 2px solid #68b5ff; outline-offset: 2px; }
+.tvguide-channel-info-details[hidden],
+.tvguide-channel-info-time[hidden],
+.tvguide-channel-info.is-minimized .tvguide-channel-info-studio { display: none; }
+.tvguide-channel-info.is-minimized { padding: 8px 48px 8px 12px; min-height: 40px; }
+.tvguide-channel-info.is-minimized .tvguide-channel-info-toggle { top: 8px; }
+.tvguide-channel-info.is-minimized .tvguide-channel-info-name { font-size: clamp(16px, 2vw, 22px); }
+.tvguide-channel-info-toggle,
+.tvguide-channel-info-resizer { opacity: 0; pointer-events: none; }
+.tvguide-channel-info.is-editing .tvguide-channel-info-toggle,
+.tvguide-channel-info.is-editing .tvguide-channel-info-resizer,
+.tvguide-channel-info-toggle:focus-visible,
+.tvguide-channel-info-resizer:focus-visible { opacity: 1; pointer-events: auto; }
+.tvguide-channel-info-time { margin-top: 6px; color: #d5dce5; font-size: clamp(13px, 1.5vw, 18px); }
+.tvguide-channel-info-studio {
+    width: clamp(48px, 8vw, 88px);
+    height: clamp(36px, 6vw, 60px);
+    object-fit: contain;
+    flex-shrink: 0;
+}
+.tvguide-channel-info-studio[hidden] { display: none; }
+.tvguide-channel-info-performers {
+    max-width: 60ch;
+    margin-top: 6px;
+    font-size: clamp(13px, 1.5vw, 18px);
+    line-height: 1.4;
+    color: #d5dce5;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+}
+.tvguide-channel-info-performers[hidden] { display: none; }
+.tvguide-surf-frame {
+    position: absolute;
+    z-index: 1;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #000;
+    pointer-events: none;
+}
+.tvguide-surf-frame[hidden] { display: none; }
+.tvguide-channel-info-name { font-size: clamp(20px, 3vw, 36px); font-weight: 700; }
+.tvguide-channel-info-program { margin-top: 6px; font-size: clamp(14px, 2vw, 22px); }
+.tvguide-channel-info-description {
+    max-width: 60ch;
+    margin-top: 8px;
+    font-size: clamp(13px, 1.5vw, 18px);
+    line-height: 1.4;
+    color: #d5dce5;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: var(--tvguide-description-lines, 3);
+    overflow: hidden;
+}
+.tvguide-channel-info-description[hidden] { display: none; }
+.tvguide-channel-info.is-resized .tvguide-channel-info-description { max-width: none; }
+
+/* Gallery Mode's fallback for Safari builds that reject element fullscreen.
+   A fixed stage preserves StashIP-TV's controls while still filling the viewport. */
+.tvguide-player-stage.tvguide-pseudo-fullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 2147483647;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    border-radius: 0;
+}
+
+.tvguide-player-stage:fullscreen,
+.tvguide-player-stage:-webkit-full-screen,
+.tvguide-player-stage.tvguide-pseudo-fullscreen {
+    touch-action: none;
+}
+
+.tvguide-player-stage.tvguide-pseudo-fullscreen .tvguide-viewer-video {
+    width: 100%;
+    height: 100%;
+    aspect-ratio: auto;
+    object-fit: contain;
+}
+
+html.stash-tvguide-scroll-lock,
+body.stash-tvguide-scroll-lock {
+    overflow: hidden !important;
+    overscroll-behavior: none;
+}
+
+html.stash-tvguide-scroll-soft-lock,
+body.stash-tvguide-scroll-soft-lock {
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior-x: none;
+}
+
+body.stash-tvguide-scroll-soft-lock {
+    min-height: calc(100% + 240px);
+    padding-bottom: 240px;
+    box-sizing: border-box;
+    -webkit-overflow-scrolling: touch;
+}
+
+.tvguide-player-stage .tvguide-viewer-video {
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: 0;
+    /* Reserve the space before the poster loads, so switching scenes cannot
+       resize the header. */
+    background: #000;
+}
+
+.tvguide-player-controls {
+    position: absolute;
+    z-index: 2;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px;
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.75));
+    opacity: 1;
+    transition: opacity 0.15s ease;
+}
+
+/* Hidden by default and revealed by `is-showing-controls`, which the player
+   toggles from real pointer/focus events. A `@media (hover: hover)` rule was
+   reporting the wrong thing on a real machine and left these permanently on. */
+.tvguide-player-controls {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.tvguide-player.is-showing-controls .tvguide-player-controls {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.tvguide-player-spacer { flex: 1 1 auto; }
+
+.tvguide-player-button {
+    min-height: 26px !important;
+    padding: 2px 8px !important;
+    background: rgba(0, 0, 0, 0.6) !important;
+    border-color: rgba(255, 255, 255, 0.28) !important;
+    color: #fff !important;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.tvguide-player-controls { gap: 4px; padding: 6px; }
+
+.tvguide-spinner {
+    position: absolute;
+    z-index: 2;
+    top: 10px;
+    right: 10px;
+    width: 20px;
+    height: 20px;
+    border: 2px solid rgba(255, 255, 255, 0.25);
+    border-top-color: #fff;
+    border-radius: 50%;
+    display: none;
+}
+
+.tvguide-player.is-loading .tvguide-spinner {
+    display: block;
+    animation: tvguide-spin 0.8s linear infinite;
+}
+
+@keyframes tvguide-spin {
+    to { transform: rotate(360deg); }
+}
+
+.tvguide-player-times,
+.tvguide-player-caption {
+    margin: 0;
+    color: var(--tvguide-text-dim);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tvguide-banner-poster {
+    flex: 0 0 auto;
+    width: var(--tvguide-banner-art-width);
+    height: 90px;
+    object-fit: cover;
+    border-radius: 4px;
+    background: var(--tvguide-surface-2);
+}
+
+/* Theater: the player takes the full width and the guide scrolls beneath it.
+   Both halves matter -- widening the player without giving it height just got
+   it clipped by the guide. */
+.tvguide-overlay.is-theater {
+    overflow-y: auto;
+}
+
+.tvguide-overlay.is-theater .tvguide-header {
+    flex: 0 0 auto;
+    height: auto;
+    flex-direction: column;
+    align-items: stretch;
+}
+
+/* Hovering previews another scene in the banner. Its height must stay stable:
+   otherwise a longer description moves the guide beneath the pointer, which
+   immediately hovers a different scene and causes a reflow loop. */
+.tvguide-overlay.is-theater .tvguide-banner {
+    flex: 0 0 clamp(176px, 22vh, 260px);
+    height: clamp(176px, 22vh, 260px);
+}
+
+.tvguide-overlay.is-theater .tvguide-player {
+    flex: 0 0 auto;
+    width: 100%;
+    height: auto;
+    order: -1;
+}
+
+.tvguide-overlay.is-theater .tvguide-player-stage {
+    max-height: 62vh;
+}
+
+.tvguide-overlay.is-theater .tvguide-viewer-video {
+    max-height: 62vh;
+    object-fit: contain;
+}
+
+.tvguide-overlay.is-theater .tvguide-stage {
+    flex: 0 0 auto;
+    height: 70vh;
+    height: 70dvh;
+    min-height: 0;
+}
+
+/* The overlay is deliberately left untouched while Safari enters native
+   fullscreen. If it was in theater mode, its viewport caps must not survive
+   on the stage that has just become fullscreen. */
+.tvguide-player-stage:fullscreen,
+.tvguide-player-stage:-webkit-full-screen,
+.tvguide-player-stage.tvguide-pseudo-fullscreen {
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    max-height: none;
+}
+
+.tvguide-player-stage:fullscreen .tvguide-viewer-video,
+.tvguide-player-stage:-webkit-full-screen .tvguide-viewer-video,
+.tvguide-player-stage.tvguide-pseudo-fullscreen .tvguide-viewer-video {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    aspect-ratio: auto;
+    object-fit: contain;
+}
+
+.tvguide-manager-bulk { display: flex; gap: 6px; }
+
+@media (max-width: 767px), (max-height: 500px) and (pointer: coarse) {
+    /* One vertical scroller: video, expanded details, and channels share the
+       overlay instead of competing for gestures in nested scroll boxes. */
+    .tvguide-overlay {
+        overflow-y: auto;
+        overscroll-behavior-y: contain;
+        -webkit-overflow-scrolling: touch;
+    }
+    .tvguide-header {
+        height: auto;
+        max-height: none;
+        overflow: visible;
+        position: static;
+        align-items: stretch;
+    }
+    .tvguide-banner,
+    .tvguide-overlay.is-theater .tvguide-banner {
+        flex: 0 0 auto;
+        height: auto;
+        overflow: visible;
+    }
+    .tvguide-banner-body { flex: 1 1 auto; overflow: visible; }
+    .tvguide-banner-art { height: auto; }
+    .tvguide-banner-extra { overflow-wrap: anywhere; }
+    .tvguide-watch { white-space: normal; }
+    .tvguide-banner { --tvguide-banner-art-width: 96px; gap: 10px; }
+    .tvguide-banner-title { font-size: 16px; overflow-wrap: anywhere; }
+    .tvguide-related { flex-wrap: wrap; }
+    .tvguide-player { flex: 0 0 auto; width: 100%; height: auto; order: -1; }
+    .tvguide-overlay.has-player .tvguide-banner-poster { display: none; }
+    .tvguide-overlay:not(.is-theater) .tvguide-header { padding: 6px 12px; }
+    .tvguide-overlay:not(.is-theater) .tvguide-player-stage:not(:fullscreen):not(:-webkit-full-screen):not(.tvguide-pseudo-fullscreen) .tvguide-viewer-video {
+        max-height: none;
+        object-fit: contain;
+    }
+    .tvguide-stage, .tvguide-list { flex: 0 0 auto; height: auto; overflow: visible; }
+    .tvguide-player-resizer, .tvguide-theater { display: none; }
+    .tvguide-rail { display: none; }
+
+    .tvguide-topbar { order: -1; }
+    .tvguide-searchbox { flex: 1 1 0; max-width: none; min-width: 0; }
+    .tvguide-toolbar-right { width: 100%; flex-wrap: wrap; }
+    .tvguide-topbar .tvguide-close { order: 0; margin-left: 0; }
+    .tvguide-toolbar-divider { display: none; }
+    .tvguide-toolbar-right .tvguide-status { flex-basis: 100%; order: 1; }
+    .tvguide-typebar { flex: 1 1 90px; }
+    .tvguide-type-select { width: 100%; }
+    .tvguide-search,
+    .tvguide-type-select,
+    .tvguide-manager input,
+    .tvguide-manager select { font-size: 16px; min-height: 44px; }
+    .tvguide-recent-panel { min-width: 0; width: 100%; box-sizing: border-box; }
+    .tvguide-recent-row { grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr); }
+    .tvguide-list-channel,
+    .tvguide-list-now,
+    .tvguide-list-times { overflow-wrap: anywhere; min-width: 0; }
+
+    .tvguide-manager { position: fixed; }
+    .tvguide-manager-tools { flex-wrap: wrap; width: 100%; min-width: 0; margin-left: 0; }
+    .tvguide-manager-search { width: 100%; min-width: 0; box-sizing: border-box; }
+    .tvguide-manager-row-actions,
+    .tvguide-manager-rule { flex-wrap: wrap; }
+    .tvguide-manager-field { min-width: 0; max-width: 100%; }
+    .tvguide-manager-field input { min-width: 0; max-width: 100%; box-sizing: border-box; }
+    .tvguide-manager-bulk { width: 100%; }
+}
