@@ -21,6 +21,10 @@ async function setup(t, overrides = {}, options = {}) {
         gql: async (query) => { calls.push(query); throw new Error('Unexpected forwarding'); },
         adapterBootstrap: async () => ({ introspection: introspectionFromSchema(schema), version: 'v0.31.1' }),
         stream: async ({ response }) => { response.writeHead(200, { 'Content-Type': 'video/mp2t' }); response.end('LIVE-TS'); },
+        hlsFactory: () => ({
+            playlist: async (_channel, id) => ({ status: 200, body: `#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2.0,\n${config.publicUrl}/stashy/scene/${id}/hls/${'a'.repeat(24)}/segment-000000000.ts?token=${config.token}\n` }),
+            segment: async () => Buffer.from('LIVE-TS'), close() {}
+        }),
         fetchFn: async () => new Response('PNG', { headers: { 'content-type': 'image/png' } }), ...options
     });
     app.server.listen(0, '127.0.0.1');
@@ -100,20 +104,30 @@ test('library mutations and unsupported reads never reach the real Stash connect
     assert.deepEqual(calls, []);
 });
 
-test('Stashy primary media URLs reuse the live stream; thumbnails proxy credentials only to Stash', async (t) => {
+test('Stashy primary and fallback HLS URLs are authenticated; thumbnails proxy credentials only to Stash', async (t) => {
     let captured;
     const { request, root } = await setup(t, { publicUrl: 'http://tvguide:9898/bridge' }, { fetchFn: async (url, options) => {
         captured = { url, options }; return new Response('PNG', { headers: { 'content-type': 'image/png' } });
     } });
     const result = await (await request('{ findScenes { scenes { paths { stream screenshot } } } }')).json();
     const paths = result.data.findScenes.scenes[0].paths;
-    for (const [field, type, body] of [['stream', 'video/mp2t', 'LIVE-TS'], ['screenshot', 'image/png', 'PNG']]) {
+    assert.match(paths.stream, /\/stashy\/scene\/tvguide-[^/]+\/stream\.m3u8\?token=/);
+    for (const [field, type, body] of [['stream', 'application/vnd.apple.mpegurl', '#EXTM3U'], ['screenshot', 'image/png', 'PNG']]) {
         const url = new URL(paths[field]);
         const response = await fetch(root + url.pathname + url.search);
         assert.equal(response.status, 200);
         assert.match(response.headers.get('content-type'), new RegExp(type));
-        assert.equal(await response.text(), body);
+        assert.ok((await response.text()).startsWith(body));
     }
+    const hls = new URL(paths.stream);
+    assert.equal((await fetch(root + hls.pathname)).status, 401);
+    // Stashy's constructed fallback authenticates with ApiKey, rather than
+    // carrying the token query from paths.stream.
+    assert.equal((await fetch(root + hls.pathname, { headers: { ApiKey: config.token } })).status, 200);
+    const segment = `${root}/bridge/stashy/scene/${adapterSceneId('tag:7')}/hls/${'a'.repeat(24)}/segment-000000000.ts`;
+    assert.equal((await fetch(segment)).status, 401);
+    assert.equal(await (await fetch(segment, { headers: { ApiKey: config.token } })).text(), 'LIVE-TS');
+    assert.equal((await fetch(`${root}/bridge/stashy/scene/missing/stream.m3u8?token=${config.token}`)).status, 404);
     assert.equal(captured.options.headers.ApiKey, config.apiKey);
     assert.equal(captured.options.redirect, 'error');
     assert.equal(captured.url, 'http://stash:9999/scene/real/screenshot');

@@ -9,6 +9,7 @@ export * from './mediaProxy.js';
 export * from './server.js';
 export * from './pluginTask.js';
 export * from './stashy.js';
+export * from './hls.js';
 
 // esbuild emits this entry as CommonJS. Importing it in tests never listens.
 if (require.main === module) {

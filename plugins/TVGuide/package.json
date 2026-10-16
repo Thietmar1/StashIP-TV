@@ -1,6 +1,6 @@
 {
   "name": "tv-guide",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Stash channel management with Jellyfin IPTV and an optional Stashy adapter",
   "private": true,
   "scripts": {
