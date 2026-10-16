@@ -2,7 +2,7 @@
   name: Funscript Ollama
   metadata:
     description: Experimental Qwen-guided optical motion analysis via Ollama.
-  version: "0.1.0-ac956dd7fa64"
-  date: "2026-10-16 14:57:24"
+  version: "0.1.1-81f03d899260"
+  date: "2026-10-16 15:11:20"
   path: FunscriptOllama.zip
-  sha256: 9048279bf36cbea2a7c920ff75e5b4667e6355b354617e59bbb8e5a32ff1cb0c
+  sha256: a10e1f2b5465aa664f6e7390d9ef559e6b1e62b7b1977420f36853ff26296a9b
