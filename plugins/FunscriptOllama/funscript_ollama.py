@@ -7,6 +7,7 @@ other than explicit image requests to the configured Ollama instance.
 from __future__ import annotations
 
 import base64
+import gc
 from concurrent.futures import ThreadPoolExecutor
 import json
 import math
@@ -21,7 +22,7 @@ from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 PLUGIN_ID = "FunscriptOllama"
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 DEFAULTS = {
     "ollama_url": "http://192.168.178.16:11434",
     "model": "qwen3-vl:8b-instruct",
@@ -30,7 +31,7 @@ DEFAULTS = {
     "error_tag": "FunscriptOllama_Error",
     "analysis_fps": 15, "roi_interval": 30, "timeout_seconds": 10800,
     "max_speed": 150, "overwrite": False,
-    "engine": "ollama_haven", "threads": 2, "batch_size": 32,
+    "engine": "ollama_haven", "threads": 2, "decoder_threads": 1, "batch_size": 32,
     "detrend_window": 2, "norm_window": 4, "keyframe_reduction": True,
     "pov_mode": False, "balance_global": True,
     "vr_auto": True, "vr_tags": "VR,Virtual Reality,180°,360°", "vr_layout": "sbs",
@@ -41,7 +42,7 @@ DEFAULTS = {
 }
 LIMITS = {"analysis_fps": (2, 30), "roi_interval": (2, 120),
           "timeout_seconds": (10, 10800), "max_speed": (10, 500),
-          "threads": (1, 32), "batch_size": (1, 3000),
+          "threads": (1, 32), "decoder_threads": (1, 16), "batch_size": (1, 3000),
           "detrend_window": (1, 10), "norm_window": (1, 10),
           "multi_axis_intensity": (0, 10), "random_speed": (0, 10),
           "auto_home_delay": (0, 10), "auto_home_duration": (0, 10),
@@ -50,7 +51,7 @@ BOOLEANS = ("overwrite", "keyframe_reduction", "pov_mode", "balance_global", "vr
             "multi_axis", "smart_limit", "import_chapters", "export_chapters", "add_marker")
 RECOMMENDED_GENERATION_SETTINGS = {key: DEFAULTS[key] for key in (
     "engine", "analysis_fps", "roi_interval", "timeout_seconds", "max_speed",
-    "threads", "batch_size", "detrend_window", "norm_window", "keyframe_reduction",
+    "threads", "decoder_threads", "batch_size", "detrend_window", "norm_window", "keyframe_reduction",
     "balance_global", "pov_mode", "vr_auto", "vr_layout", "multi_axis", "overwrite",
     "multi_axis_intensity", "random_speed", "smart_limit", "auto_home_delay", "auto_home_duration",
 )}
@@ -73,6 +74,9 @@ REGION_PROMPT = (
     "Return only JSON matching the supplied schema: active (false if no clear "
     "independent movement), confidence (0..1), roi [left,top,right,bottom] with "
     "normalized coordinates 0..1, axis x or y for the main image-space movement. "
+    "Use left < right and top < bottom, with width and height at least 0.05. "
+    "If there is no suitable region, return active false, confidence 0, "
+    "roi [0,0,1,1], axis y. "
     "Do not invent motion timings or action values."
 )
 
@@ -88,7 +92,7 @@ def configuration(raw):
             raise ValueError(f"{key} must be a finite number")
         if not low <= value <= high:
             raise ValueError(f"{key} must be between {low} and {high}")
-    for key in ("threads", "batch_size"):
+    for key in ("threads", "decoder_threads", "batch_size"):
         if settings[key] != int(settings[key]):
             raise ValueError(f"{key} must be an integer")
         settings[key] = int(settings[key])
@@ -131,13 +135,27 @@ def validate_region(value):
     if not isinstance(value, dict) or type(value.get("active")) is not bool:
         raise ValueError("Qwen response is missing boolean active")
     confidence = value.get("confidence")
+    if type(confidence) not in (int, float) or not math.isfinite(confidence) or not 0 <= confidence <= 1:
+        raise ValueError("Qwen confidence must be a finite number in 0..1")
+    if not value["active"] or confidence < 0.5:
+        # Inactive/uncertain detections are never measured. Models often return
+        # an empty ROI here; it must not abort an otherwise usable video.
+        return {"active": False, "confidence": confidence, "roi": [0, 0, 1, 1], "axis": "y"}
     roi = value.get("roi")
     numbers = ([confidence] + roi) if isinstance(roi, list) else []
     if (len(numbers) != 5 or any(type(n) not in (float, int) or not math.isfinite(n) for n in numbers)
             or any(not 0 <= n <= 1 for n in numbers)):
         raise ValueError("Qwen confidence/ROI must contain finite numbers in 0..1")
-    if roi[2] - roi[0] < 0.05 or roi[3] - roi[1] < 0.05:
-        raise ValueError("Qwen ROI must have width and height of at least 0.05")
+    if roi[2] <= roi[0] or roi[3] <= roi[1]:
+        raise ValueError("Qwen ROI must have left < right and top < bottom")
+    roi = list(roi)
+    # Keep a valid small selection centered, padding only to the tracking
+    # minimum. Never reinterpret reversed/zero-size coordinates as a region.
+    for start, end in ((0, 2), (1, 3)):
+        if roi[end] - roi[start] < 0.05:
+            center = (roi[start] + roi[end]) / 2
+            roi[start] = max(0, min(0.95, center - 0.025))
+            roi[end] = roi[start] + 0.05
     if value.get("axis") not in ("x", "y"):
         raise ValueError("Qwen axis must be x or y")
     return {"active": value["active"] and confidence >= 0.5,
@@ -156,6 +174,7 @@ class Ollama:
         started = time.monotonic()
         if self.log:
             self.log.info(f"Waiting for Ollama {path}; timeout {self.settings['timeout_seconds']} seconds")
+            log_process_memory(self.log)
         try:
             with urlopen(req, timeout=self.settings["timeout_seconds"]) as response:
                 data = response.read(2 * 1024 * 1024 + 1)
@@ -163,7 +182,7 @@ class Ollama:
                 raise ValueError("Ollama response exceeds 2 MiB")
             result = json.loads(data)
             if self.log:
-                self.log.info(f"Ollama {path} answered after {time.monotonic()-started:.1f} seconds")
+                self.log.info(f"Step OK: Ollama {path} answered after {time.monotonic()-started:.1f} seconds; response JSON decoded")
             return result
         except HTTPError as exc:
             # Do not echo response bodies: a proxy could include credentials.
@@ -176,6 +195,8 @@ class Ollama:
         capabilities = data.get("capabilities", [])
         if capabilities and "vision" not in capabilities:
             raise ValueError("Configured Ollama model does not advertise vision support")
+        if self.log:
+            self.log.info("Step OK: Ollama model information checked")
 
     def region(self, frames):
         import cv2
@@ -185,19 +206,72 @@ class Ollama:
             if not ok:
                 raise RuntimeError("Cannot encode analysis image")
             images.append(base64.b64encode(encoded.tobytes()).decode("ascii"))
-        result = self.request("/api/chat", {
+        body = {
             "model": self.settings["model"], "stream": False,
             "messages": [{"role": "user", "content": REGION_PROMPT, "images": images}],
             "format": REGION_SCHEMA, "options": {"temperature": 0, "num_predict": 256},
             "keep_alive": "5m",
-        })
-        if result.get("done") is not True or result.get("done_reason") == "length":
-            raise ValueError("Ollama returned an incomplete response")
-        try:
-            value = json.loads(result["message"]["content"])
-        except (KeyError, TypeError, json.JSONDecodeError):
-            raise ValueError("Ollama returned no valid region JSON") from None
-        return validate_region(value)
+        }
+        for attempt in range(2):
+            result = self.request("/api/chat", body)
+            if result.get("done") is not True or result.get("done_reason") == "length":
+                raise ValueError("Ollama returned an incomplete response")
+            try:
+                try:
+                    value = json.loads(result["message"]["content"])
+                except (KeyError, TypeError, json.JSONDecodeError):
+                    raise ValueError("Ollama returned no valid region JSON") from None
+                region = validate_region(value)
+                if self.log and region["active"] and region["roi"] != value["roi"]:
+                    self.log.info("Qwen tracking region padded to the minimum width/height of 0.05")
+                if self.log:
+                    self.log.info(f"Step OK: Qwen tracking region validated; active={region['active']}, confidence={region['confidence']:.2f}")
+                return region
+            except ValueError as exc:
+                if attempt:
+                    raise
+                if self.log:
+                    self.log.info(f"Invalid Qwen tracking region: {exc}; requesting one correction")
+                body["messages"][0]["content"] = REGION_PROMPT + " Correct the previous error: " + str(exc)
+
+
+def log_process_memory(log):
+    """Optional Linux diagnostics; no external commands or private paths logged."""
+    try:
+        fields = dict(line.split(":", 1) for line in Path("/proc/self/status").read_text().splitlines() if ":" in line)
+        rss = int(fields["VmRSS"].split()[0]) / 1024
+        peak = int(fields["VmHWM"].split()[0]) / 1024
+    except (OSError, KeyError, ValueError):
+        return
+    log.info(f"Plugin memory: RSS {rss:.0f} MiB; peak {peak:.0f} MiB")
+
+
+def open_video(path, settings, log=None):
+    import cv2
+    # Open-only FFmpeg property: limiting optical-flow workers alone does not
+    # limit the decoder's full-resolution reference-frame buffers.
+    cap = cv2.VideoCapture(str(path), cv2.CAP_FFMPEG,
+                           [cv2.CAP_PROP_N_THREADS, settings["decoder_threads"]])
+    if not cap.isOpened():
+        cap.release()
+        # Preserve native alternative backends, but never retry FFmpeg with
+        # automatic (potentially very large) decoder parallelism.
+        for backend in cv2.videoio_registry.getStreamBackends():
+            if backend == cv2.CAP_FFMPEG:
+                continue
+            cap = cv2.VideoCapture(str(path), backend)
+            if cap.isOpened():
+                break
+            cap.release()
+        if log and cap.isOpened():
+            log.info("Non-FFmpeg decoder: decoder thread limit is unavailable for this backend")
+    if not cap.isOpened():
+        cap.release()
+        raise ValueError("OpenCV cannot open this video/codec")
+    if log:
+        log.info(f"Step OK: Video decoder opened: {cap.getBackendName()}; {int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x"
+                 f"{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}; requested decoder threads {settings['decoder_threads']}")
+    return cap
 
 
 def measured_motion(previous, current, region, balance_global=True):
@@ -330,18 +404,18 @@ def measure_selected(previous, current, region, settings):
                                         settings["pov_mode"], settings["balance_global"]))
 
 
-def analyze_video(path, settings, ollama, progress=lambda value: None, vr=False):
+def analyze_video(path, settings, ollama, progress=lambda value: None, vr=False, log=None):
     import cv2
-    cap = cv2.VideoCapture(str(path))
-    if not cap.isOpened():
-        cap.release()
-        raise ValueError("OpenCV cannot open this video/codec")
+    cv2.setNumThreads(1)  # Avoid a second internal pool per optical-flow worker.
+    cap = open_video(path, settings, log)
     executor = ThreadPoolExecutor(max_workers=settings["threads"])
     try:
         fps = cap.get(cv2.CAP_PROP_FPS)
         count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
         if not math.isfinite(fps) or fps <= 0 or not math.isfinite(count) or count < 3:
             raise ValueError("Video needs valid frame rate and frame count")
+        if log:
+            log.info(f"Step OK: Video metadata validated; {fps:.3f} fps, {int(count)} frames, {count/fps:.1f} seconds")
         expected_ms = count / fps * 1000
         stride = max(1, round(fps / settings["analysis_fps"]))
         index, previous, previous_color = 0, None, None
@@ -353,7 +427,10 @@ def analyze_video(path, settings, ollama, progress=lambda value: None, vr=False)
             pending.clear()
         def finish_segment():
             drain()
-            segments.append(segment_actions(samples, settings["max_speed"], settings))
+            points = segment_actions(samples, settings["max_speed"], settings)
+            segments.append(points)
+            if log and points:
+                log.info(f"Step OK: Motion segment processed through {samples[-1][0]/1000:.1f}s; {len(samples)} samples, {len(points)} keyframes")
         while True:
             ok = cap.grab()
             if not ok:
@@ -375,6 +452,8 @@ def analyze_video(path, settings, ollama, progress=lambda value: None, vr=False)
             if previous is None:
                 previous, previous_color = gray, frame
                 samples = [(at, 0.0)]
+                if log:
+                    log.info("Step OK: First video frame decoded and prepared for analysis")
                 continue
             cut = is_cut(previous, gray)
             if cut:
@@ -388,6 +467,8 @@ def analyze_video(path, settings, ollama, progress=lambda value: None, vr=False)
                 region = (ollama.region([previous_color, frame]) if settings["engine"] != "haven" else
                           {"active": True, "confidence": 1.0, "roi": [0, 0, 1, 1], "axis": "y"})
                 regions.append({"at": at, **region})
+                if log:
+                    log.info(f"Step OK: Tracking region selected at {at/1000:.1f}s; active={region['active']}")
                 last_refresh = at
                 samples = [(at, 0.0)]
             else:
@@ -401,10 +482,14 @@ def analyze_video(path, settings, ollama, progress=lambda value: None, vr=False)
             raise ValueError("Video decoding ended substantially before its reported end")
         if last_at < expected_ms * 0.5:
             raise ValueError("Decoded duration is inconsistent with video metadata")
+        if log:
+            log.info(f"Step OK: Video decoding completed; {index} frames, analyzed through {last_at/1000:.1f}s")
         finish_segment()
         actions = finalize_actions(segments, settings["max_speed"])
         if not any(r["active"] for r in regions) or max(a["pos"] for a in actions)-min(a["pos"] for a in actions) < 3:
             raise ValueError("No reliable motion was measured; no output file was created")
+        if log:
+            log.info(f"Step OK: Motion analysis and script validation completed; {len(actions)} actions, {len(regions)} tracking regions")
         return {"version": "1.0", "inverted": False, "range": 100, "actions": actions,
                 "metadata": {"creator": f"Funscript Ollama {VERSION}", "model": settings["model"],
                              "experimental": True, "engine": settings["engine"],
@@ -414,7 +499,7 @@ def analyze_video(path, settings, ollama, progress=lambda value: None, vr=False)
         cap.release()
 
 
-def save_script(path, script, overwrite=False):
+def save_script(path, script, overwrite=False, log=None):
     """Atomic publication; never replace an existing file unless explicitly enabled."""
     path = Path(path)
     descriptor, temporary = tempfile.mkstemp(prefix=".funscript-", suffix=".tmp", dir=path.parent)
@@ -428,6 +513,8 @@ def save_script(path, script, overwrite=False):
                 backup = path.with_name(path.name + f".{time.time_ns()}.bak")
                 with path.open("rb") as source, backup.open("xb") as target:
                     shutil.copyfileobj(source, target)
+                if log:
+                    log.info("Step OK: Existing sidecar backup created")
             os.replace(temporary, path)
         else:
             # Hard-link publication is atomic and fails if the destination exists.
@@ -444,14 +531,14 @@ class SceneQueue:
     def scenes(self, all_scenes=False):
         if all_scenes:
             return self.stash.find_scenes(f={}, filter={"per_page": -1},
-                                          fragment="id files { path } tags { id name }") or []
+                                          fragment="id") or []
         tag = self.stash.find_tag(self.settings["trigger_tag"], create=False)
         if not tag:
             return []
         # Snapshot the entire queue before removing tags during processing.
         return self.stash.find_scenes(
             f={"tags": {"value": [tag["id"]], "modifier": "INCLUDES"}},
-            filter={"per_page": -1}, fragment="id files { path } tags { id name }") or []
+            filter={"per_page": -1}, fragment="id") or []
 
     def status(self, scene_id, success):
         fresh = self.stash.find_scene(scene_id, fragment="id tags { id }")
@@ -493,7 +580,8 @@ def secondary_scripts(path, script, settings, log):
             continue
         points = finalize_actions([points], settings["max_speed"])
         save_script(target, {"version": "1.0", "inverted": False, "range": 100, "actions": points},
-                    settings["overwrite"])
+                    settings["overwrite"], log=log)
+        log.info(f"Step OK: Additional axis {name} saved; {len(points)} actions")
         count += 1
     return count
 
@@ -502,9 +590,10 @@ def marker_steps(stash, scene_id, script, settings, log):
     from chapters import import_chapters, completion_marker
     if settings["import_chapters"]:
         count = import_chapters(stash, scene_id, script, settings["marker_tolerance"])
-        log.info(f"Scene {scene_id}: imported {count} new chapter markers")
+        log.info(f"Scene {scene_id}: Step OK: Chapter import completed; {count} new markers")
     if settings["add_marker"]:
-        completion_marker(stash, scene_id, settings["marker_tolerance"])
+        count = completion_marker(stash, scene_id, settings["marker_tolerance"])
+        log.info(f"Scene {scene_id}: Step OK: Completion marker checked; {count} created")
 
 
 def import_existing(stash, settings, log, all_scenes=False):
@@ -514,11 +603,15 @@ def import_existing(stash, settings, log, all_scenes=False):
     # The explicit import task runs independently of the automatic-import switch.
     for index, scene in enumerate(scenes):
         try:
+            scene = stash.find_scene(scene["id"], fragment="id files { path }") or scene
             for item in scene.get("files", []):
                 path = Path(item["path"]).with_suffix(".funscript")
                 if path.is_file():
-                    result["markers"] += import_chapters(stash, scene["id"], load_script(path),
-                                                         settings["marker_tolerance"])
+                    script = load_script(path)
+                    log.info(f"Scene {scene['id']}: Step OK: Existing sidecar loaded for chapter import")
+                    added = import_chapters(stash, scene["id"], script, settings["marker_tolerance"])
+                    result["markers"] += added
+                    log.info(f"Scene {scene['id']}: Step OK: Chapter import completed; {added} new markers")
             result["scenes"] += 1
         except Exception as exc:
             result["failed"] += 1
@@ -537,17 +630,21 @@ def process_queue(stash, settings, log):
     scenes = queue.scenes()
     summary = {"created": 0, "skipped": 0, "failed": 0}
     log.info(f"Queued scenes: {len(scenes)}; processing sequentially")
+    log.info("Step OK: Queue snapshot loaded")
     for i, scene in enumerate(scenes):
         try:
+            scene = stash.find_scene(scene["id"], fragment="id files { path } tags { id name }") or scene
             files = scene.get("files") or []
             if len(files) != 1 or not files[0].get("path"):
                 raise ValueError("Exactly one local video file per scene is supported")
             path = Path(files[0]["path"])
             if not path.is_file():
                 raise ValueError("Video path is not accessible inside the Stash runtime")
+            log.info(f"Scene {scene['id']}: Step OK: Scene details and local video path checked ({i+1}/{len(scenes)})")
             output = path.with_suffix(".funscript")
             if output.exists() and not settings["overwrite"]:
                 existing = load_script(output)
+                log.info(f"Scene {scene['id']}: Step OK: Existing primary script loaded")
                 secondary_scripts(path, existing, settings, log)
                 marker_steps(stash, scene["id"], existing, settings, log)
                 summary["skipped"] += 1
@@ -556,24 +653,29 @@ def process_queue(stash, settings, log):
             log.info(f"Scene {scene['id']}: analyzing video with {settings['engine']} engine")
             script = analyze_video(path, settings, ollama,
                                    lambda value: log.progress((i+value)/len(scenes)),
-                                   vr=vr_scene(scene, settings))
+                                   vr=vr_scene(scene, settings), log=log)
             if settings["export_chapters"]:
                 previous = load_script(output) if output.exists() else None
                 export_chapters(stash, scene["id"], script, previous)
-            save_script(output, script, settings["overwrite"])
+                log.info(f"Scene {scene['id']}: Step OK: Chapter export completed; {len(script.get('metadata', {}).get('chapters', []))} chapters")
+            save_script(output, script, settings["overwrite"], log=log)
+            log.info(f"Scene {scene['id']}: Step OK: Primary script saved; {len(script['actions'])} actions")
             secondary_scripts(path, script, settings, log)
             marker_steps(stash, scene["id"], script, settings, log)
             queue.status(scene["id"], True)
+            log.info(f"Scene {scene['id']}: Step OK: Stash completion tags updated")
             summary["created"] += 1
-            log.info(f"Scene {scene['id']}: script saved ({len(script['actions'])} actions)")
+            log.info(f"Scene {scene['id']}: Step OK: Scene processing completed")
         except Exception as exc:
             summary["failed"] += 1
             log.error(f"Scene {scene['id']}: {exc}")
             try:
                 queue.status(scene["id"], False)
+                log.info(f"Scene {scene['id']}: Error status saved; queue tag retained")
             except Exception as tag_exc:
                 log.error(f"Could not update error tag: {tag_exc}")
         finally:
+            gc.collect()  # Release traceback/worker cycles holding native frame buffers between scenes.
             log.progress((i+1)/len(scenes))
     log.progress(1)
     return summary
@@ -586,6 +688,7 @@ def run(payload, stash_factory=None, log=None):
     if log is None:
         import stashapi.log as log
     stash = stash_factory(payload["server_connection"])
+    log.info(f"Step OK: Stash client initialized; Funscript Ollama {VERSION}")
     mode = payload.get("args", {}).get("mode", "process_scenes")
     if mode == "apply_recommended":
         # configure_plugin merges these selected keys with the current plugin
@@ -595,6 +698,7 @@ def run(payload, stash_factory=None, log=None):
         return {"output": "Recommended generation settings applied. Reload plugin settings to see the values."}
     raw = stash.get_configuration(fragment="plugins").get("plugins", {}).get(PLUGIN_ID, {})
     settings = configuration(raw)
+    log.info(f"Step OK: Plugin settings validated; engine={settings['engine']}, Ollama timeout={settings['timeout_seconds']} seconds")
     if mode in ("import_chapters", "import_all_chapters"):
         summary = import_existing(stash, settings, log, all_scenes=mode == "import_all_chapters")
         return {"output": f"Scanned: {summary['scenes']}; imported markers: {summary['markers']}; failed: {summary['failed']}",

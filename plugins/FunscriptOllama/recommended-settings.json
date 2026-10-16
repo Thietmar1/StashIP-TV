@@ -5,6 +5,7 @@
   "timeout_seconds": 10800,
   "max_speed": 150,
   "threads": 2,
+  "decoder_threads": 1,
   "batch_size": 32,
   "detrend_window": 2,
   "norm_window": 4,

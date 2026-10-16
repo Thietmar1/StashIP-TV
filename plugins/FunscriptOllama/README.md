@@ -1,4 +1,4 @@
-# Funscript Ollama (Prototyp 0.2.1)
+# Funscript Ollama (Prototyp 0.2.2)
 
 Eigenständiges Stash-Plugin, inspiriert vom Tag-Ablauf von
 [FunscriptHaven](https://github.com/stashapp/CommunityScripts/tree/main/plugins/FunscriptHaven).
@@ -108,7 +108,7 @@ https://raw.githubusercontent.com/Thietmar1/StashIP-TV/tvguide-iptv/index.yml
 ```
 
 Quellen aktualisieren, **Funscript Ollama** installieren und die Python-Abhängigkeiten
-wie unten beschrieben einrichten. Version 0.2.1 erscheint nach Merge und erfolgreicher
+wie unten beschrieben einrichten. Version 0.2.2 erscheint nach Merge und erfolgreicher
 Veröffentlichung dieses Updates. Die bisherige separate Quelle
 `https://raw.githubusercontent.com/Thietmar1/StashIP-TV/funscript-ollama/index.yml`
 wird aus Kompatibilitätsgründen weiter aktualisiert. Bereits installierte Plugins
@@ -306,6 +306,7 @@ angeordneten Bildern; bei übereinander angeordneten Bildern `tb` wählen.
 | Overwrite Existing Funscript | aus | Vor Überschreiben immer Sicherung erstellen |
 | Processing Engine | `ollama_haven` | `ollama`, `haven` oder `ollama_haven` |
 | Motion Worker Threads | 2 | Parallele optische Messungen; 1–32 |
+| Video Decoder Threads | 1 | FFmpeg-Decoder-Threads; ganze Zahl 1–16, unabhängig von den Analyse-Workern |
 | Maximum Queued Frame Pairs | 32 | Maximale wartende Bildpaare; 1–3000 |
 | Detrend Window Seconds | 2 | Driftbereinigung; 1–10 |
 | Normalization Window Seconds | 4 | Lokale Bereichskalibrierung; 1–10 |
@@ -349,6 +350,72 @@ das Regionsintervall beispielsweise auf 120 Sekunden setzen. Erkannte Schnitte
 lösen trotzdem eine neue Auswahl aus. Die automatische Analyse kann deutlich
 länger als die Videolaufzeit dauern. GPU-Beschleunigung wird in Ollama eingerichtet,
 nicht durch dieses Stash-Plugin. Den aktuellen Modellstatus zeigt Ollamas `/api/ps`.
+
+## Ungültige Bildbereiche und Prozessabbrüche
+
+Ab Version 0.2.2 beenden leere Bildbereiche bei `active: false` oder einer
+Konfidenz unter 0.5 die Szene nicht mehr: Diese Abschnitte liefern keine gemessene
+Bewegung. Gültige, aber sehr kleine aktive Bereiche werden um ihren Mittelpunkt
+auf mindestens 5 % Bildbreite und -höhe erweitert, innerhalb der Bildgrenzen.
+Vertauschte Koordinaten oder aktive Bereiche ohne Fläche werden nicht umgedeutet.
+Bei ungültigem Bereichs-JSON fordert das Plugin einmal eine korrigierte Antwort
+mit denselben Bildern an. Schlägt auch diese fehl, bleibt die Szene im Fehlerstatus;
+es gibt keine unbegrenzte Wiederholung oder erfundene Ersatzbewegung.
+Jede dieser Anfragen verwendet den konfigurierten Ollama-Timeout.
+
+`Plugin returned error: signal: killed` bezeichnet einen von außen beendeten
+Plugin-Prozess. Es ist kein vom Python-HTTP-Client gemeldeter Timeout.
+Speichermangel, ein Aufgabenabbruch oder das Beenden eines Containers kommen
+als Ursachen infrage; die Meldung allein unterscheidet sie nicht.
+Bei Speichermangel steht das entscheidende Kernelereignis häufig im
+Proxmox-Hostprotokoll, nicht im LXC. `docker inspect ... OOMKilled=false`
+schließt das Beenden nur eines Python-Unterprozesses nicht aus.
+
+Für einen LXC mit 3 GiB zunächst **Video Decoder Threads = 1** beibehalten.
+OpenCV erhält die Grenze beim Öffnen des FFmpeg-Decoders: Viele automatisch
+angelegte Decoder-Threads können weitere Puffer für die volle Videoauflösung
+benötigen, auch wenn die spätere Analyse nur mit 512 Pixeln arbeitet.
+Das ist von **Motion Worker Threads** unabhängig. OpenCVs zusätzliche interne
+Analyse-Parallelität wird auf einen Thread pro Aufruf begrenzt.
+Die FFmpeg-Option ist in der
+[OpenCV-Dokumentation](https://docs.opencv.org/4.13.0/d4/d15/group__videoio__flags__base.html)
+beschrieben. Native alternative Decoder bleiben nutzbar, können diese spezielle
+Grenze jedoch nicht anwenden; dann erscheint eine entsprechende Protokollmeldung.
+Es wird kein FFmpeg-Neustart mit unbegrenzter Parallelität versucht.
+Dies begrenzt die Parallelität, garantiert aber keine feste RAM-Obergrenze.
+
+Die Aufgabenprotokolle nennen Decoder, Originalauflösung und vor Ollama-Anfragen
+unter Linux den aktuellen/maximalen RAM-Verbrauch des Plugin-Prozesses.
+Zusätzlich melden sie abgeschlossene Schritte mit **`Step OK:`**: Stash-Anbindung,
+validierte Einstellungen, Warteschlange, Szenendaten, geöffnetes Video, Metadaten,
+erstes Bild, Ollama-Antwort, validierter Bildbereich, ausgewerteter Abschnitt,
+abgeschlossene Analyse, Kapitel, gespeicherte Hauptdatei/Zusatzachsen und
+aktualisierte Stash-Tags. Abschnittsmeldungen enthalten die Position im Video und
+die Zahl der Messpunkte/Keyframes. Es gibt keine Meldung pro Einzelbild.
+Erfolge werden erst nach dem jeweiligen Schritt protokolliert. Scheitert etwa die
+Tag-Aktualisierung nach dem Speichern, bleibt die erfolgreiche Dateimeldung stehen,
+aber die Szene erhält keine Abschlussmeldung. Deaktivierte Schritte werden nicht
+als ausgeführt gemeldet. Zugangsschlüssel und Bildinhalte werden nicht protokolliert.
+Bei großen Warteschlangen hält das Plugin nur die Szenen-IDs als Snapshot;
+Dateipfade und Tags werden jeweils für die nächste Szene abgefragt.
+Nach jeder Szene werden auch zyklische Referenzen auf Bildpuffer freigegeben.
+
+Zum Eingrenzen zuerst eine kurze einzelne Szene verarbeiten. Wenn bereits viele
+Szenen markiert sind, vorübergehend einen separaten **Queue Tag** wie
+`FunscriptOllama_Test` konfigurieren und nur der Testszene geben. Die ursprünglichen
+Queue-Tags bleiben dadurch erhalten. Während des Tests im Stash-LXC beobachten:
+
+```bash
+docker stats stash
+```
+
+Bei erneutem Abbruch auf dem **Proxmox-Host des LXC** den betroffenen Zeitraum
+abfragen, beispielsweise:
+
+```bash
+journalctl -k --since '2026-10-16 19:40:00' --until '2026-10-16 19:49:00' --no-pager \
+  | grep -Ei 'oom|out of memory|killed process|memory cgroup'
+```
 
 ## Entwicklung und Prüfung
 

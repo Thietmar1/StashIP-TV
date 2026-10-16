@@ -1,6 +1,6 @@
 name: Funscript Ollama
 description: Experimental Ollama/Haven motion analysis, VR/POV processing, multi-axis sidecars and Funscript chapter markers.
-version: "0.2.1"
+version: "0.2.2"
 url: https://github.com/Thietmar1/StashIP-TV/tree/main/plugins/FunscriptOllama
 exec:
   - python
@@ -75,6 +75,10 @@ settings:
   threads:
     displayName: Motion Worker Threads
     description: "Default: 2; integer 1–32. Optical-flow workers; does not configure Ollama threads."
+    type: NUMBER
+  decoder_threads:
+    displayName: Video Decoder Threads
+    description: "Default: 1; integer 1–16. Limits FFmpeg decoder threads and associated full-resolution buffers. Separate from optical-flow workers; lower values help on memory-limited hosts."
     type: NUMBER
   batch_size:
     displayName: Maximum Queued Frame Pairs
