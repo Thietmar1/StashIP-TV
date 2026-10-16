@@ -1,0 +1,56 @@
+query Configuration {
+  configuration {
+    general {
+      stashes {
+        path
+        excludeVideo
+        excludeImage
+      }
+      stashBoxes {
+        endpoint
+        name
+      }
+    }
+    defaults {
+      identify {
+        sources {
+          source {
+            stash_box_endpoint
+            stash_box_index
+          }
+          options {
+            fieldOptions {
+              field
+              strategy
+              createMissing
+            }
+            setCoverImage
+            setOrganized
+            includeMalePerformers
+            performerGenders
+            skipMultipleMatches
+            skipMultipleMatchTag
+            skipSingleNamePerformers
+            skipSingleNamePerformerTag
+          }
+        }
+        options {
+          fieldOptions {
+            field
+            strategy
+            createMissing
+          }
+          setCoverImage
+          setOrganized
+          includeMalePerformers
+          performerGenders
+          skipMultipleMatches
+          skipMultipleMatchTag
+          skipSingleNamePerformers
+          skipSingleNamePerformerTag
+        }
+      }
+    }
+  }
+}
+

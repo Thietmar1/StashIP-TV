@@ -1,4 +1,4 @@
-# TVGuide in Jellyfin (M3U + XMLTV)
+# TVGuide channel management, Jellyfin and Stashy
 
 TVGuide's included IPTV server exposes the Stash guide as live channels:
 
@@ -7,6 +7,13 @@ TVGuide's included IPTV server exposes the Stash guide as live channels:
 - `/stream/<encoded-channel-id>.ts`: a continuous MPEG-TS stream that joins the
   programme currently on air at its live offset, then advances to the next one.
 - `/health`: process health (also requires the TVGuide token).
+- `/stashy/graphql`: optional read-only virtual library for Stashy (1.2.0+).
+
+The Stash browser now contains **channel management only**. The old browser
+player and programme grid are not included in the browser bundle. Saved lineups,
+names, pins, logos and scene-pool settings are retained. Jellyfin/EPG keep the
+same server-side schedule. See [NATIVE-APPS.md](NATIVE-APPS.md) for the Stashy
+prototype, setup and the outstanding iOS/tvOS device playback checks.
 
 Stash starts the included server through plugin tasks, using its raw external
 plugin interface. It runs in the background so the task queue remains available.
@@ -58,6 +65,7 @@ Open TVGuide's plugin settings and set:
 | IPTV Guide Days | `3` (zero/empty also uses 3 in 1.1.2+) |
 | IPTV Maximum Streams | `2` (zero/empty also uses 2 in 1.1.2+) |
 | IPTV First Channel Number | `12` (default; reserves 1–11 for existing channels) |
+| Enable Stashy Adapter (Prototype) | Off by default; enable for an additional Stashy server at `Public URL/stashy` |
 
 Leave **IPTV Stash URL** empty to use Stash's local task connection. If Stash returns
 media URLs using an external origin, set this field to that same reachable origin.
@@ -163,6 +171,7 @@ TVGUIDE_TOKEN=PASTE_THE_GENERATED_TOKEN_HERE
 TVGUIDE_EPG_DAYS=3
 TVGUIDE_MAX_STREAMS=2
 TVGUIDE_FIRST_CHANNEL_NUMBER=12
+TVGUIDE_STASHY_ENABLED=false
 TZ=Europe/Berlin
 ```
 
@@ -235,11 +244,10 @@ not repair missing manual mappings.
 
 ### Native Stash apps
 
-See the [native app integration assessment](https://github.com/Thietmar1/hippo-stash-plugins/blob/main/plugins/TVGuide/NATIVE-APPS.md)
-for Stashy iOS/tvOS.
-The running TVGuide server already provides the schedule and streams over
-M3U/XMLTV; a native app must explicitly consume them. Installing the Stash plugin
-does not add a native screen to an existing app.
+The optional [Stashy adapter](NATIVE-APPS.md) presents live channels as virtual
+scenes in a separate Stash connection. Titles contain channel and current scene
+names; no native EPG is required. The existing Streams/EPG endpoints are shared
+with Jellyfin. Device playback still needs to be checked on iOS and tvOS.
 
 See the [official Jellyfin setup guide](https://jellyfin.org/docs/general/server/live-tv/setup-guide/)
 for the M3U tuner and XMLTV provider screens.
@@ -306,4 +314,3 @@ or newer and reload plugins before running Start IPTV Server again. Installing
 Node through a user's nvm shell does not make it available to Stash's service.
 For another OS or a custom Node location, change the manifest's first `exec` entry
 to the absolute path of that Node executable; standalone operation is unchanged.
-

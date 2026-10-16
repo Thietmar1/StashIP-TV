@@ -21,8 +21,18 @@ test('Stash task config reads plugin settings with its session and preserves ser
     assert.equal(config.ffmpeg, '/usr/bin/ffmpeg');
     assert.equal(config.host, '0.0.0.0');
     assert.equal(config.timezone, 'Europe/Berlin');
+    assert.equal(config.stashyEnabled, false);
     await assert.rejects(pluginConfig({}, { client: () => async () => ({ configuration: { plugins: { TVGuide: { ...settings, iptv_03_public_url: '' } } } }) }), /Public URL/);
     await assert.rejects(pluginConfig({}, { client: () => async () => ({ configuration: { plugins: { TVGuide: { ...settings, iptv_09_timezone: 'not-a-zone' } } } }) }), /timezone/);
+});
+
+test('Stashy adapter must be explicitly enabled in plugin settings', async () => {
+    for (const enabled of [true, false, undefined, 'true']) {
+        const config = await pluginConfig({}, { client: () => async () => ({ configuration: {
+            plugins: { TVGuide: { ...settings, iptv_12_stashy_adapter: enabled } }, general: {}
+        } }) });
+        assert.equal(config.stashyEnabled, enabled === true);
+    }
 });
 
 test('session-cookie auth is used only when an API key is absent', async () => {
@@ -176,4 +186,3 @@ test('invalid task arguments, unavailable FFmpeg and concurrent tasks fail witho
     await writeFile(join(root, 'tvguide-iptv/task.lock'), 'busy');
     await assert.rejects(runPluginTask(input), /Another/);
 });
-

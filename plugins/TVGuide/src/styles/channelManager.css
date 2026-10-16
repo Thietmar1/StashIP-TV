@@ -1,0 +1,8 @@
+.tvguide-manager-shell[hidden] { display: none !important; }
+.tvguide-manager-shell > .tvguide-manager { inset: 12px; }
+.tvguide-manager-shell .tvguide-manager-title::after {
+    content: ' · Jellyfin / Stashy';
+    font-size: .7em;
+    font-weight: normal;
+    color: var(--tvguide-text-dim);
+}
