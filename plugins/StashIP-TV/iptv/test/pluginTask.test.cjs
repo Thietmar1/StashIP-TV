@@ -94,9 +94,14 @@ test('raw task JSON retains UTF-8 characters split between stream chunks on all 
     assert.deepEqual(await readInput(Readable.from(chunks)), value);
 });
 
-async function temp(t) {
+async function temp(t, beforeRemove) {
     const root = await mkdtemp(join(tmpdir(), 'StashIP-TV tasks Ü with spaces-'));
-    t.after(() => rm(root, { recursive: true, force: true }));
+    t.after(async () => {
+        // after hooks run in registration order. Stop first: task('stop') also
+        // creates its control directory, so it must not race recursive removal.
+        await beforeRemove?.();
+        await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    });
     return root;
 }
 
@@ -108,7 +113,8 @@ async function listen(t, server) {
 }
 
 test('real detached Stash plugin tasks start, report, restart and stop the packaged server', { timeout: 20000 }, async (t) => {
-    const root = await temp(t);
+    let task;
+    const root = await temp(t, async () => { if (task) await task('stop'); });
     const free = createServer();
     free.listen(0, '127.0.0.1');
     await once(free, 'listening');
@@ -142,8 +148,7 @@ test('real detached Stash plugin tasks start, report, restart and stop the packa
     await copyFile(require.resolve('../../tvguide-server.js'), script);
     const options = { script, checkBinary: () => true,
         spawnFn: (binary, args, opts) => { commandLines.push([binary, ...args]); return spawn(binary, args, opts); } };
-    const task = (operation) => runPluginTask({ ...input, args: { operation } }, options);
-    t.after(async () => { await task('stop').catch(() => {}); });
+    task = (operation) => runPluginTask({ ...input, args: { operation } }, options);
     assert.equal((await task('status')).running, false);
     const first = await task('start');
     assert.equal(first.running, true);
