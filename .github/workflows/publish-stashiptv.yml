@@ -43,9 +43,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Install test FFmpeg
+      - name: Install Linux test FFmpeg
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install Windows test FFmpeg
+        if: runner.os == 'Windows'
         run: python -m pip install imageio-ffmpeg==0.6.0
-      - name: Configure real-media tests
+      - name: Configure Linux real-media tests
+        if: runner.os == 'Linux'
+        run: echo 'FFMPEG_TEST_PATH=/usr/bin/ffmpeg' >> "$GITHUB_ENV"
+      - name: Configure Windows real-media tests
+        if: runner.os == 'Windows'
         run: python -c "import os,imageio_ffmpeg; f=open(os.environ['GITHUB_ENV'],'a',encoding='utf-8'); f.write('FFMPEG_TEST_PATH='+imageio_ffmpeg.get_ffmpeg_exe()+'\n'); f.close()"
       - name: Install dependencies
         working-directory: plugins/StashIP-TV

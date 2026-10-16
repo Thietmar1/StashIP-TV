@@ -16,7 +16,7 @@ test('real FFmpeg keeps one decodable video/audio transport stream across a live
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const run = (args) => {
         const result = spawnSync(binary, ['-hide_banner', '-loglevel', 'error', ...args], { windowsHide: true, maxBuffer: 5 * 1024 * 1024 });
-        assert.equal(result.status, 0, result.stderr?.toString());
+        assert.equal(result.status, 0, `FFmpeg status=${result.status}, signal=${result.signal}, error=${result.error?.message || 'none'}\n${result.stderr?.toString() || ''}`);
         return result.stdout;
     };
     for (const color of ['red', 'blue']) {
