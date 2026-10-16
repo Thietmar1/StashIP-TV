@@ -8,7 +8,7 @@ import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 FILES = ["FunscriptOllama.yml", "funscript_ollama.py", "haven_motion.py", "chapters.py",
-         "requirements.txt", "README.md", "THIRD-PARTY-NOTICES.md"]
+         "requirements.txt", "recommended-settings.json", "README.md", "THIRD-PARTY-NOTICES.md"]
 
 
 def package(output_dir, revision, check=False):

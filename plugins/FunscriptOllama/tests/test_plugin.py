@@ -8,6 +8,7 @@ import tempfile
 import subprocess
 import sys
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
@@ -78,6 +79,7 @@ class ConfigTests(unittest.TestCase):
 class OllamaTests(unittest.TestCase):
     def setUp(self):
         self.calls, self.reply, self.status = [], {"done": True, "message": {"content": json.dumps(REGION)}}, 200
+        self.delay = 0
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -92,7 +94,11 @@ class OllamaTests(unittest.TestCase):
                         data = {"configuration": {"general": {"apiKey": "private-stash-key"}}}
                     elif "__schema" in query:
                         data = {"__schema": {"types": []}}
-                    elif "Configuration" in query:
+                    elif "ConfigurePlugin" in query:
+                        variables = body["variables"]
+                        owner.settings = copy.deepcopy(variables["input"])
+                        data = {"configurePlugin": owner.settings}
+                    elif "Configuration" in query or "FindPluginConfig" in query:
                         data = {"configuration": {"plugins": {plugin.PLUGIN_ID: owner.settings}}}
                     else:
                         data = {}
@@ -101,6 +107,7 @@ class OllamaTests(unittest.TestCase):
                     self.end_headers()
                     self.wfile.write(json.dumps({"data": data}).encode())
                     return
+                time.sleep(owner.delay)
                 self.send_response(owner.status)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
@@ -136,6 +143,40 @@ class OllamaTests(unittest.TestCase):
             self.reply = reply
             with self.subTest(reply=reply), self.assertRaises(ValueError):
                 self.client.region([np.zeros((32, 32, 3), np.uint8)])
+
+    def test_waits_for_delayed_response_and_logs_wait_without_retry(self):
+        self.delay = 0.15
+        log = FakeLog()
+        client = plugin.Ollama(self.settings, log)
+        started = time.monotonic()
+        self.assertTrue(client.region([np.zeros((32, 32, 3), np.uint8)])["active"])
+        self.assertGreaterEqual(time.monotonic()-started, self.delay)
+        self.assertEqual([p for p, _ in self.calls], ["/api/chat"])
+        self.assertIn("10800 seconds", log.messages[0])
+        self.assertIn("answered after", log.messages[1])
+
+    def test_apply_preset_via_real_stash_client_preserves_other_settings(self):
+        preserved = {"ollama_url": "http://custom-host:11434", "model": "custom-model",
+                     "trigger_tag": "Queue", "complete_tag": "Done", "error_tag": "Failed",
+                     "vr_tags": "Custom VR", "import_chapters": False, "export_chapters": False,
+                     "marker_tolerance": 1.5, "add_marker": True, "private_value": "do-not-log"}
+        self.settings = {**preserved, "timeout_seconds": 600, "engine": "ollama",
+                         "analysis_fps": 10, "overwrite": True}
+        payload = {"server_connection": {"Scheme": "http", "Host": "127.0.0.1",
+                                         "Port": self.server.server_port, "ApiKey": "private-stash-key"},
+                   "args": {"mode": "apply_recommended"}}
+        result = subprocess.run([sys.executable, str(ROOT / "funscript_ollama.py")],
+                                input=json.dumps(payload), text=True, capture_output=True,
+                                timeout=30, env=os.environ.copy())
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("applied", json.loads(result.stdout)["output"])
+        self.assertEqual(self.settings, {**preserved, **plugin.RECOMMENDED_GENERATION_SETTINGS})
+        mutations = [body for path, body in self.calls if "ConfigurePlugin" in body.get("query", "")]
+        self.assertEqual(len(mutations), 1)
+        self.assertEqual(mutations[0]["variables"]["plugin_id"], plugin.PLUGIN_ID)
+        self.assertTrue(all(path == "/graphql" for path, _ in self.calls))
+        for secret in ("private-stash-key", "do-not-log"):
+            self.assertNotIn(secret, result.stdout + result.stderr)
 
     def test_http_errors_do_not_echo_response_body(self):
         self.status = 404
@@ -200,7 +241,7 @@ class MotionTests(unittest.TestCase):
                 writer.write(image)
             writer.release()
             model = type("Model", (), {"region": lambda self, frames: REGION})()
-            script = plugin.analyze_video(path, plugin.configuration({}), model)
+            script = plugin.analyze_video(path, plugin.configuration({"engine": "ollama"}), model)
             self.assertGreater(len(script["actions"]), 5)
             self.assertGreater(max(a["pos"] for a in script["actions"])-min(a["pos"] for a in script["actions"]), 10)
             self.assertGreater(script["actions"][-1]["at"], 7000)

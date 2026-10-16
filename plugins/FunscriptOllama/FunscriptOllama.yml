@@ -1,12 +1,16 @@
 name: Funscript Ollama
 description: Experimental Ollama/Haven motion analysis, VR/POV processing, multi-axis sidecars and Funscript chapter markers.
-version: "0.2.0"
+version: "0.2.1"
 url: https://github.com/Thietmar1/StashIP-TV/tree/main/plugins/FunscriptOllama
 exec:
   - python
   - "{pluginDir}/funscript_ollama.py"
 interface: raw
 tasks:
+  - name: Apply Recommended Generation Settings
+    description: Apply the documented generation preset and 3-hour Ollama timeout. Preserve server URL, model, tag names and marker preferences. Reload settings afterwards.
+    defaultArgs:
+      mode: apply_recommended
   - name: Test Ollama Connection
     description: Check the configured model and run a small synthetic image request. No library video is sent.
     defaultArgs:
@@ -26,7 +30,7 @@ tasks:
 settings:
   engine:
     displayName: Processing Engine
-    description: "ollama (default), haven (no Ollama requests), or ollama_haven (Qwen region plus Haven radial flow)."
+    description: "ollama_haven (default, Qwen region plus Haven radial flow), ollama (directional flow), or haven (no Ollama requests)."
     type: STRING
   ollama_url:
     displayName: Ollama URL
@@ -50,15 +54,15 @@ settings:
     type: STRING
   analysis_fps:
     displayName: Analysis Frames Per Second
-    description: "Default: 10; range 2–30. OpenCV measures movement at this rate, not Ollama."
+    description: "Default: 15; range 2–30. OpenCV measures movement at this rate, not Ollama."
     type: NUMBER
   roi_interval:
     displayName: Qwen Region Refresh Seconds
-    description: "Default: 20; range 2–120. Each refresh sends two sampled frames to your Ollama server."
+    description: "Default: 30; range 2–120. Each refresh sends two sampled frames to your Ollama server."
     type: NUMBER
   timeout_seconds:
     displayName: Ollama Request Timeout Seconds
-    description: "Default: 600; range 10–1800. CPU inference can take several minutes. A failed or invalid model response aborts that scene."
+    description: "Default: 10800 seconds (3 hours); range 10–10800. Wait for the full Ollama response up to the configured timeout. Applies per request, not per video."
     type: NUMBER
   max_speed:
     displayName: Maximum Position Change Per Second
@@ -106,7 +110,7 @@ settings:
     type: STRING
   vr_layout:
     displayName: VR Layout
-    description: "haven (default, lower-left quarter), sbs (left eye), tb (top eye), mono (no crop). Applies to detected VR scenes."
+    description: "sbs (default, left eye), haven (lower-left quarter), tb (top eye), mono (no crop). Select the actual layout of detected VR scenes."
     type: STRING
   multi_axis:
     displayName: Generate Additional Axes

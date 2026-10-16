@@ -35,11 +35,23 @@ class SettingsTests(unittest.TestCase):
         self.assertIn('version: "'+plugin.VERSION+'"', manifest)
 
     def test_installer_timeout_is_used_by_the_actual_http_request(self):
-        settings = plugin.configuration({"timeout_seconds": 947})
-        with patch.object(plugin, "urlopen") as request:
-            request.return_value.__enter__.return_value.read.return_value = b'{"capabilities":["vision"]}'
-            plugin.Ollama(settings).check_model()
-            self.assertEqual(request.call_args.kwargs["timeout"], 947)
+        self.assertEqual(plugin.configuration({})["timeout_seconds"], 10800)
+        for seconds in (947, 10800):
+            settings = plugin.configuration({"timeout_seconds": seconds})
+            with self.subTest(seconds=seconds), patch.object(plugin, "urlopen") as request:
+                request.return_value.__enter__.return_value.read.return_value = b'{"capabilities":["vision"]}'
+                plugin.Ollama(settings).check_model()
+                self.assertEqual(request.call_args.kwargs["timeout"], seconds)
+        with self.assertRaises(ValueError):
+            plugin.configuration({"timeout_seconds": 10801})
+
+    def test_distributed_preset_is_valid_and_matches_runtime(self):
+        preset = json.loads((ROOT / "recommended-settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(preset, plugin.RECOMMENDED_GENERATION_SETTINGS)
+        settings = plugin.configuration(preset)
+        self.assertEqual(settings["engine"], "ollama_haven")
+        self.assertFalse(settings["multi_axis"])
+        self.assertFalse(settings["overwrite"])
 
     def test_invalid_extra_settings_and_explicit_zero_values(self):
         for values in ({"threads": 1.5}, {"batch_size": 0}, {"engine": "unknown"}, {"vr_layout": "auto"},
@@ -145,9 +157,10 @@ class HavenTests(unittest.TestCase):
         self.assertFalse(plugin.vr_scene({"tags": [{"name": "VR"}]}, {**settings, "vr_auto": False}))
         image = np.zeros((80, 120, 3), np.uint8)
         image[40:, :60] = 100
-        haven = plugin.prepare_frame(image, settings, True)
+        haven = plugin.prepare_frame(image, {**settings, "vr_layout": "haven"}, True)
         self.assertEqual(haven.shape, (40, 60, 3))
         self.assertTrue(np.all(haven == 100))
+        self.assertEqual(plugin.prepare_frame(image, settings, True).shape, (80, 60, 3))
         self.assertEqual(plugin.prepare_frame(image, {**settings, "vr_layout": "sbs"}, True).shape, (80, 60, 3))
         self.assertEqual(plugin.prepare_frame(image, {**settings, "vr_layout": "tb"}, True).shape, (40, 120, 3))
         self.assertEqual(plugin.prepare_frame(image, {**settings, "vr_layout": "mono"}, True).shape, image.shape)

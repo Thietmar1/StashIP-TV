@@ -21,26 +21,26 @@ from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 PLUGIN_ID = "FunscriptOllama"
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 DEFAULTS = {
     "ollama_url": "http://192.168.178.16:11434",
     "model": "qwen3-vl:8b-instruct",
     "trigger_tag": "FunscriptOllama_Process",
     "complete_tag": "FunscriptOllama_Complete",
     "error_tag": "FunscriptOllama_Error",
-    "analysis_fps": 10, "roi_interval": 20, "timeout_seconds": 600,
+    "analysis_fps": 15, "roi_interval": 30, "timeout_seconds": 10800,
     "max_speed": 150, "overwrite": False,
-    "engine": "ollama", "threads": 2, "batch_size": 32,
+    "engine": "ollama_haven", "threads": 2, "batch_size": 32,
     "detrend_window": 2, "norm_window": 4, "keyframe_reduction": True,
     "pov_mode": False, "balance_global": True,
-    "vr_auto": True, "vr_tags": "VR,Virtual Reality,180°,360°", "vr_layout": "haven",
+    "vr_auto": True, "vr_tags": "VR,Virtual Reality,180°,360°", "vr_layout": "sbs",
     "multi_axis": False, "multi_axis_intensity": 5, "random_speed": 3,
     "auto_home_delay": 1, "auto_home_duration": 1, "smart_limit": True,
     "import_chapters": True, "export_chapters": True, "marker_tolerance": 0.25,
     "add_marker": False,
 }
 LIMITS = {"analysis_fps": (2, 30), "roi_interval": (2, 120),
-          "timeout_seconds": (10, 1800), "max_speed": (10, 500),
+          "timeout_seconds": (10, 10800), "max_speed": (10, 500),
           "threads": (1, 32), "batch_size": (1, 3000),
           "detrend_window": (1, 10), "norm_window": (1, 10),
           "multi_axis_intensity": (0, 10), "random_speed": (0, 10),
@@ -48,6 +48,12 @@ LIMITS = {"analysis_fps": (2, 30), "roi_interval": (2, 120),
           "marker_tolerance": (0, 15)}
 BOOLEANS = ("overwrite", "keyframe_reduction", "pov_mode", "balance_global", "vr_auto",
             "multi_axis", "smart_limit", "import_chapters", "export_chapters", "add_marker")
+RECOMMENDED_GENERATION_SETTINGS = {key: DEFAULTS[key] for key in (
+    "engine", "analysis_fps", "roi_interval", "timeout_seconds", "max_speed",
+    "threads", "batch_size", "detrend_window", "norm_window", "keyframe_reduction",
+    "balance_global", "pov_mode", "vr_auto", "vr_layout", "multi_axis", "overwrite",
+    "multi_axis_intensity", "random_speed", "smart_limit", "auto_home_delay", "auto_home_duration",
+)}
 REGION_SCHEMA = {
     "type": "object", "additionalProperties": False,
     "required": ["active", "confidence", "roi", "axis"],
@@ -139,19 +145,26 @@ def validate_region(value):
 
 
 class Ollama:
-    def __init__(self, settings):
+    def __init__(self, settings, log=None):
         self.settings = settings
+        self.log = log
 
     def request(self, path, body=None):
         payload = None if body is None else json.dumps(body, allow_nan=False).encode()
         req = Request(self.settings["ollama_url"] + path, data=payload,
                       headers={"Content-Type": "application/json"})
+        started = time.monotonic()
+        if self.log:
+            self.log.info(f"Waiting for Ollama {path}; timeout {self.settings['timeout_seconds']} seconds")
         try:
             with urlopen(req, timeout=self.settings["timeout_seconds"]) as response:
                 data = response.read(2 * 1024 * 1024 + 1)
             if len(data) > 2 * 1024 * 1024:
                 raise ValueError("Ollama response exceeds 2 MiB")
-            return json.loads(data)
+            result = json.loads(data)
+            if self.log:
+                self.log.info(f"Ollama {path} answered after {time.monotonic()-started:.1f} seconds")
+            return result
         except HTTPError as exc:
             # Do not echo response bodies: a proxy could include credentials.
             raise RuntimeError(f"Ollama HTTP {exc.code}; check URL/model and Ollama logs") from None
@@ -517,7 +530,7 @@ def import_existing(stash, settings, log, all_scenes=False):
 
 def process_queue(stash, settings, log):
     from chapters import load_script, export_chapters
-    ollama = None if settings["engine"] == "haven" else Ollama(settings)
+    ollama = None if settings["engine"] == "haven" else Ollama(settings, log)
     if ollama:
         ollama.check_model()
     queue = SceneQueue(stash, settings)
@@ -573,9 +586,15 @@ def run(payload, stash_factory=None, log=None):
     if log is None:
         import stashapi.log as log
     stash = stash_factory(payload["server_connection"])
+    mode = payload.get("args", {}).get("mode", "process_scenes")
+    if mode == "apply_recommended":
+        # configure_plugin merges these selected keys with the current plugin
+        # settings. Credentials, tag names and marker preferences remain intact.
+        stash.configure_plugin(PLUGIN_ID, dict(RECOMMENDED_GENERATION_SETTINGS))
+        log.info("Recommended generation settings applied, including a 10800-second Ollama timeout")
+        return {"output": "Recommended generation settings applied. Reload plugin settings to see the values."}
     raw = stash.get_configuration(fragment="plugins").get("plugins", {}).get(PLUGIN_ID, {})
     settings = configuration(raw)
-    mode = payload.get("args", {}).get("mode", "process_scenes")
     if mode in ("import_chapters", "import_all_chapters"):
         summary = import_existing(stash, settings, log, all_scenes=mode == "import_all_chapters")
         return {"output": f"Scanned: {summary['scenes']}; imported markers: {summary['markers']}; failed: {summary['failed']}",
@@ -583,7 +602,7 @@ def run(payload, stash_factory=None, log=None):
     if mode == "test_connection":
         import numpy as np
         import cv2
-        client = Ollama(settings)
+        client = Ollama(settings, log)
         client.check_model()
         a = np.zeros((160, 240, 3), dtype=np.uint8)
         b = a.copy()
