@@ -1,4 +1,4 @@
-# Funscript Ollama (Prototyp 0.2.2)
+# Funscript Ollama (Prototyp 0.3.0)
 
 Eigenständiges Stash-Plugin, inspiriert vom Tag-Ablauf von
 [FunscriptHaven](https://github.com/stashapp/CommunityScripts/tree/main/plugins/FunscriptHaven).
@@ -9,15 +9,27 @@ Es erstellt eine primäre `.funscript`-Datei und optional fünf zusätzliche Ach
 neben dem Video. Die lizenzierten Haven-Komponenten und Anpassungen sind in
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) dokumentiert.
 
+Ab **0.3.0** kann die Bildbereichsauswahl alternativ über **ChatGPT/Codex CLI**
+oder **Gemini CLI** erfolgen: Anmeldung mit dem eigenen Konto, ohne separat
+abgerechneten API-Schlüssel. Unter **AI Provider** `ollama`, `chatgpt_cli` oder
+`gemini_cli` eintragen. Die CLI-Anbieter senden ausgewählte Bilder in die Cloud
+und nutzen die Kontingente des angemeldeten Kontos; sie benötigen zusätzliche
+Installation und Anmeldung im Stash-Laufzeitkonto. Sie sind noch nicht mit deinem
+Konto bzw. echtem Videomaterial geprüft.
+
+**[Einrichtung für Docker/LXC, Linux und Windows: CLI-SETUP.md](CLI-SETUP.md)**.
+Danach mit **Test Selected AI Provider** ausschließlich künstliche Bilder testen.
+Ollama bleibt Standard und behält Adresse, Modell und bisherigen Ablauf.
+
 ## Verarbeitungsmodi
 
 Unter **Processing Engine** einen dieser Werte eintragen:
 
 | Wert | Verhalten |
 | --- | --- |
-| `ollama` | Qwen wählt Bereich/Achse; OpenCV misst die gerichtete Bewegung. |
-| `haven` | Haven-Radialbewegung ohne Ollama. Auch bei ausgeschaltetem Ollama-Server nutzbar. |
-| `ollama_haven` | Standard: Qwen wählt den Bereich; darin wird Havens radiale Bewegung ausgewertet. |
+| `ollama` | Der gewählte KI-Anbieter wählt Bereich/Achse; OpenCV misst die gerichtete Bewegung. |
+| `haven` | Haven-Radialbewegung vollständig lokal, ohne KI-Anbieter. |
+| `ollama_haven` | Standard: Der gewählte Anbieter wählt den Bereich; darin wird Havens radiale Bewegung ausgewertet. |
 
 **POV Mode** schaltet auch im `ollama`-Modus auf die radiale Messung mit einem
 Ursprung unten in der Mitte des gewählten Bereichs um. **Balance Global Motion**
@@ -108,7 +120,7 @@ https://raw.githubusercontent.com/Thietmar1/StashIP-TV/tvguide-iptv/index.yml
 ```
 
 Quellen aktualisieren, **Funscript Ollama** installieren und die Python-Abhängigkeiten
-wie unten beschrieben einrichten. Version 0.2.2 erscheint nach Merge und erfolgreicher
+wie unten beschrieben einrichten. Version 0.3.0 erscheint nach Merge und erfolgreicher
 Veröffentlichung dieses Updates. Die bisherige separate Quelle
 `https://raw.githubusercontent.com/Thietmar1/StashIP-TV/funscript-ollama/index.yml`
 wird aus Kompatibilitätsgründen weiter aktualisiert. Bereits installierte Plugins
@@ -275,7 +287,7 @@ Die neuen Standardwerte stehen auch in [recommended-settings.json](recommended-s
 Die Aufgabe **Apply Recommended Generation Settings** speichert dieses Profil
 in Stash. Sie ändert die dort aufgeführten Erzeugungseinstellungen einschließlich
 Timeout und schaltet das Überschreiben vorhandener Dateien aus. Ollama-Adresse,
-Modell, Tag-Namen, benutzerdefinierte VR-Tags und sämtliche Marker-Einstellungen
+Modell, KI-Anbieter, CLI-Pfade, Kontoverzeichnis, CLI-Modelle, Tag-Namen, benutzerdefinierte VR-Tags und sämtliche Marker-Einstellungen
 bleiben erhalten. Die Aufgabe analysiert keine Videos und stellt keine Ollama-Anfrage.
 Bereits gespeicherte Werte bleiben bei einem normalen Plugin-Update erhalten;
 das Profil wird erst durch die ausdrückliche Aufgabe übernommen.
@@ -299,9 +311,15 @@ angeordneten Bildern; bei übereinander angeordneten Bildern `tb` wählen.
 
 | Einstellung | Standard | Bedeutung |
 | --- | --- | --- |
+| AI Provider | `ollama` | `ollama`, `chatgpt_cli`, `gemini_cli`; siehe CLI-SETUP.md |
+| ChatGPT Codex CLI Path | `codex` | Offizielle Codex CLI im Stash-PATH oder absoluter Pfad |
+| Gemini CLI Path | `gemini` | Offizielle Gemini CLI im Stash-PATH oder absoluter Pfad |
+| ChatGPT CLI Model | leer | CLI-Standard oder bildfähiges Modell des ChatGPT-Kontos |
+| Gemini CLI Model | leer | CLI-Standard oder verfügbarer Modellname/Alias |
+| CLI Account Directory | leer | Normale CLI-Verzeichnisse; optional eigener persistenter absoluter Ordner |
 | Analysis Frames Per Second | 15 | Zielrate der optischen Messung; 2–30 |
-| Qwen Region Refresh Seconds | 30 | Neue Bildbereichsauswahl; 2–120 Sekunden |
-| Ollama Request Timeout Seconds | 10800 | 3 Stunden je HTTP-Anfrage einschließlich Modellladezeit; 10–10800 |
+| AI Region Refresh Seconds | 30 | Neue Bildbereichsauswahl; 2–120 Sekunden |
+| AI Request Timeout Seconds | 10800 | 3 Stunden je Ollama-Anfrage oder CLI-Bildaufruf; 10–10800 |
 | Maximum Position Change Per Second | 150 | Begrenzung für Werte von 0–100; 10–500 |
 | Overwrite Existing Funscript | aus | Vor Überschreiben immer Sicherung erstellen |
 | Processing Engine | `ollama_haven` | `ollama`, `haven` oder `ollama_haven` |
@@ -328,14 +346,15 @@ angeordneten Bildern; bei übereinander angeordneten Bildern `tb` wählen.
 | Add Completion Marker | aus | Abschlussmarker bei Sekunde null |
 
 Der **Timeout ist pro Installation in Stash einstellbar**, unter
-**Einstellungen → Plugins → Funscript Ollama → Ollama Request Timeout Seconds**.
+**Einstellungen → Plugins → Funscript Ollama → AI Request Timeout Seconds**.
 10800 Sekunden (3 Stunden) sind der Standard für ein leeres Feld. Ein bereits
 gespeicherter eigener Wert wird durch das Update nicht ersetzt: bei Bedarf manuell
 auf `10800` setzen oder das Startprofil anwenden. Der Verbindungstest und beide
-Ollama-Verarbeitungsmodi verwenden diesen Wert für ihre HTTP-Anfragen.
-Das Plugin wartet auf die vollständige Antwort (`stream: false`); im
+KI-Verarbeitungsmodi verwenden diesen Wert für die Bildanfragen.
+Ollama wartet auf die vollständige Antwort (`stream: false`); die CLI-Anbieter
+warten auf den abgeschlossenen CLI-Aufruf. Im
 Aufgabenprotokoll stehen Beginn und Ende jeder Anfrage. Der Timeout begrenzt die
-Wartezeit auf die Antwort pro HTTP-Anfrage, nicht die gesamte Szene oder Aufgabe.
+Wartezeit pro Anfrage, nicht die gesamte Szene oder Aufgabe.
 Netzwerkfehler, ein Abbruch durch Ollama oder vorgeschaltete Proxy-Timeouts können
 die Anfrage früher beenden. Nach einem Fehler wird kein Ersatzskript erfunden.
 

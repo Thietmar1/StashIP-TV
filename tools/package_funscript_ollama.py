@@ -7,8 +7,8 @@ import re
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-FILES = ["FunscriptOllama.yml", "funscript_ollama.py", "haven_motion.py", "chapters.py",
-         "requirements.txt", "recommended-settings.json", "README.md", "THIRD-PARTY-NOTICES.md"]
+FILES = ["FunscriptOllama.yml", "funscript_ollama.py", "cli_vision.py", "haven_motion.py", "chapters.py",
+         "requirements.txt", "recommended-settings.json", "README.md", "CLI-SETUP.md", "THIRD-PARTY-NOTICES.md"]
 
 
 def package(output_dir, revision, check=False):
@@ -29,7 +29,7 @@ def package(output_dir, revision, check=False):
         f'- id: FunscriptOllama\n'
         f'  name: Funscript Ollama\n'
         f'  metadata:\n'
-        f'    description: Ollama and Haven motion analysis with VR, extra axes and chapter markers.\n'
+        f'    description: Ollama or account-based ChatGPT/Gemini CLI vision with Haven motion, VR, extra axes and chapters.\n'
         f'  version: "{version}-{revision}"\n'
         f'  date: "{date}"\n'
         f'  path: FunscriptOllama.zip\n'
@@ -41,7 +41,7 @@ def package(output_dir, revision, check=False):
         with zipfile.ZipFile(archive) as bundle:
             assert set(bundle.namelist()) == set(FILES + ["LICENCE"]), "Unexpected package contents"
             assert sum(n.endswith(".yml") for n in bundle.namelist()) == 1, "Multiple plugin manifests"
-            for name in ("funscript_ollama.py", "haven_motion.py", "chapters.py"):
+            for name in ("funscript_ollama.py", "cli_vision.py", "haven_motion.py", "chapters.py"):
                 compile(bundle.read(name), name, "exec")
         assert checksum in (output_dir / "index.yml").read_text(), "Index checksum differs"
     print(f"Built {archive} (SHA256 {checksum})" + ("; package checks passed" if check else ""))

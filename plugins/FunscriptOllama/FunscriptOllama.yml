@@ -1,14 +1,18 @@
 name: Funscript Ollama
-description: Experimental Ollama/Haven motion analysis, VR/POV processing, multi-axis sidecars and Funscript chapter markers.
-version: "0.2.2"
+description: Experimental Ollama, ChatGPT CLI or Gemini CLI vision with Haven motion analysis, VR/POV, extra axes and chapter markers.
+version: "0.3.0"
 url: https://github.com/Thietmar1/StashIP-TV/tree/main/plugins/FunscriptOllama
 exec:
   - python
   - "{pluginDir}/funscript_ollama.py"
 interface: raw
 tasks:
+  - name: Test Selected AI Provider
+    description: Test the selected provider with two synthetic images. ChatGPT/Gemini use the installed official CLI and an existing account login, without API keys.
+    defaultArgs:
+      mode: test_provider
   - name: Apply Recommended Generation Settings
-    description: Apply the documented generation preset and 3-hour Ollama timeout. Preserve server URL, model, tag names and marker preferences. Reload settings afterwards.
+    description: Apply the documented generation preset and 3-hour AI timeout. Preserve AI provider, account paths, models, server URL, tag names and marker preferences. Reload settings afterwards.
     defaultArgs:
       mode: apply_recommended
   - name: Test Ollama Connection
@@ -28,9 +32,33 @@ tasks:
     defaultArgs:
       mode: import_all_chapters
 settings:
+  ai_provider:
+    displayName: AI Provider
+    description: "ollama (default), chatgpt_cli (official Codex CLI with ChatGPT login), or gemini_cli (official Gemini CLI with Google login). CLI providers send selected frames to the cloud and consume account quotas; no API-key fallback."
+    type: STRING
+  codex_path:
+    displayName: ChatGPT Codex CLI Path
+    description: "Default: codex from PATH. Alternatively an absolute executable path, without extra arguments. Install the official @openai/codex CLI in the same runtime as Stash."
+    type: STRING
+  codex_model:
+    displayName: ChatGPT CLI Model
+    description: "Empty: CLI account default. Optional exact model supported by your ChatGPT/Codex account, with image inputs. Independent of Ollama Model."
+    type: STRING
+  gemini_path:
+    displayName: Gemini CLI Path
+    description: "Default: gemini from PATH. Alternatively an absolute executable path, without extra arguments. Install the official @google/gemini-cli CLI in the Stash runtime."
+    type: STRING
+  gemini_model:
+    displayName: Gemini CLI Model
+    description: "Empty: CLI account default. Optional image-capable model or alias available to your Google account. Independent of Ollama Model."
+    type: STRING
+  cli_account_dir:
+    displayName: CLI Account Directory
+    description: "Optional absolute persistent folder. Codex uses <folder>/codex; Gemini uses <folder>/gemini/.gemini. Empty: CLI's normal account home. Complete login manually under the Stash service/container account; see README."
+    type: STRING
   engine:
     displayName: Processing Engine
-    description: "ollama_haven (default, Qwen region plus Haven radial flow), ollama (directional flow), or haven (no Ollama requests)."
+    description: "ollama_haven (default, selected AI region plus Haven radial flow), ollama (selected AI plus directional flow), or haven (local motion only, no AI provider). Legacy mode names are retained."
     type: STRING
   ollama_url:
     displayName: Ollama URL
@@ -57,12 +85,12 @@ settings:
     description: "Default: 15; range 2–30. OpenCV measures movement at this rate, not Ollama."
     type: NUMBER
   roi_interval:
-    displayName: Qwen Region Refresh Seconds
-    description: "Default: 30; range 2–120. Each refresh sends two sampled frames to your Ollama server."
+    displayName: AI Region Refresh Seconds
+    description: "Default: 30; range 2–120. Each refresh sends two sampled frames to the selected AI provider."
     type: NUMBER
   timeout_seconds:
-    displayName: Ollama Request Timeout Seconds
-    description: "Default: 10800 seconds (3 hours); range 10–10800. Wait for the full Ollama response up to the configured timeout. Applies per request, not per video."
+    displayName: AI Request Timeout Seconds
+    description: "Default: 10800 seconds (3 hours); range 10–10800. Wait for the complete response per Ollama request or CLI image invocation, not per video. CLI version/login checks use 30 seconds."
     type: NUMBER
   max_speed:
     displayName: Maximum Position Change Per Second
