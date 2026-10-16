@@ -47,6 +47,7 @@ function catalogLoadEffect(state, page = 1) {
 }
 
 function requestCatalogPage(state, page = 1) {
+    if (state.managerView !== 'all') return { state, effects: [] };
     const requestKey = catalogRequestKey(state);
     const entry = state.catalogRequests[requestKey] || {
         channels: [], total: 0, loadedPages: [], loadingPage: null, error: null
@@ -740,6 +741,13 @@ export function reduce(state, event) {
         case Events.SET_MANAGER_SOURCE: {
             if (event.source === state.managerSource) return { state, effects };
             return requestCatalogPage({ ...state, managerSource: event.source }, 1);
+        }
+
+        case Events.SET_MANAGER_VIEW: {
+            const view = ['active', 'selected'].includes(event.view) ? event.view : 'all';
+            if (view === state.managerView) return { state, effects };
+            const requested = requestCatalogPage({ ...state, managerView: view }, 1);
+            return { state: requested.state, effects: [Effects.persist(STORAGE_KEYS.managerView, view), ...requested.effects] };
         }
 
         case Events.MANAGER_CLOSE:

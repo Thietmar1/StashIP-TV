@@ -34,6 +34,12 @@ const SORT_LABELS = {
 const BULK_CONFIRM_THRESHOLD = 200;
 
 export function createManager({ store }) {
+    const viewSelect = el('select', {
+        id: 'tvguide-manager-view', class: 'tvguide-manager-view',
+        onchange: (event) => store.dispatch({ type: Events.SET_MANAGER_VIEW, view: event.target.value })
+    }, el('option', { value: 'active' }, 'Active channels'),
+    el('option', { value: 'selected' }, 'Selected (including hidden)'),
+    el('option', { value: 'all' }, 'All available channels'));
     const search = el('input', {
         type: 'search',
         id: 'tvguide-manager-search',
@@ -90,6 +96,8 @@ export function createManager({ store }) {
                 { class: 'tvguide-manager-tools' },
                 el('label', { for: 'tvguide-manager-source', class: 'tvguide-sr-only' }, 'Channel type'),
                 sourceSelect,
+                el('label', { for: 'tvguide-manager-view', class: 'tvguide-sr-only' }, 'Show channels'),
+                viewSelect,
                 el('label', { for: 'tvguide-manager-search', class: 'tvguide-sr-only' }, 'Filter channels'),
                 search,
                 favorited,
@@ -133,14 +141,16 @@ export function createManager({ store }) {
         if (!state.managerOpen) return;
 
         if (sortSelect.value !== state.managerSort) sortSelect.value = state.managerSort;
+        sourceSelect.value = state.managerSource;
+        viewSelect.value = state.managerView;
         // The overlay clock re-renders every second. Until the debounced query
         // reaches state, the input is its own source of truth so a clock tick
         // cannot write the older store value over what the user is typing.
         if (pendingSearch === null && search.value !== state.managerSearch) search.value = state.managerSearch;
         const capabilities = sel.catalogCapabilities(state.managerSource);
-        favorited.hidden = !capabilities.favorite;
+        favorited.hidden = state.managerView !== 'all' || !capabilities.favorite;
         favorited.firstChild.checked = state.managerCatalogFavorited;
-        gender.hidden = !capabilities.gender;
+        gender.hidden = state.managerView !== 'all' || !capabilities.gender;
         if (gender.value !== state.managerCatalogGender) gender.value = state.managerCatalogGender;
 
         renderStatus(state);
@@ -149,6 +159,7 @@ export function createManager({ store }) {
         // otherwise typing in an editor field would destroy the field.
         const signature = [
             state.managerSource,
+            state.managerView,
             // Per-source now, so read it through the selector -- the raw value
             // is an object and would stringify identically every time.
             sel.catalogRequestKey(state),
@@ -160,7 +171,7 @@ export function createManager({ store }) {
             // Pins live outside prefs now; without this, pinning changes the
             // store but not the panel.
             JSON.stringify(state.pinOrder),
-            state.allChannels.length,
+            JSON.stringify(state.allChannels),
             [...editing].join(',')
         ].join('|');
         if (signature === renderedSignature) return;
@@ -182,6 +193,12 @@ export function createManager({ store }) {
     return { element: root, render, destroy: () => clearTimeout(searchTimer) };
 
     function renderStatus(state) {
+        if (state.managerView !== 'all') {
+            status.textContent = state.channelsStatus === PoolStatus.LOADING ? 'Loading selected channels…'
+                : state.channelsError ? `Could not load selected channels: ${state.channelsError}`
+                : `${sel.catalogRows(state).length} ${state.managerView === 'active' ? 'active' : 'selected'} channels of this type. Active means selected for TV and not hidden.`;
+            return;
+        }
         const page = sel.catalogPage(state);
         if ((page.loadingPage && page.channels.length === 0) || (!page.loadedPages.length && sel.catalogStatus(state) === PoolStatus.LOADING)) {
             status.textContent = 'Loading available channels…';
@@ -214,13 +231,15 @@ export function createManager({ store }) {
             ),
             rows.length === 0
                 ? el('p', { class: 'tvguide-manager-empty' },
-                      sel.catalogPage(state).loadingPage ? '…' : 'Nothing matches.')
+                      state.managerView === 'all' ? (sel.catalogPage(state).loadingPage ? '…' : 'Nothing matches.')
+                          : 'No matching selected channels of this type. Choose All available channels to add channels.')
                 : el('ul', { class: 'tvguide-manager-list' }, rows.map((row) => renderRow(state, source, row))),
             catalogFooter(state)
         );
     }
 
     function catalogFooter(state) {
+        if (state.managerView !== 'all') return null;
         const page = sel.catalogPage(state);
         const nextPage = page.loadedPages.length + 1;
         if (page.error) return el('button', { class: 'tvguide-manager-load-more', type: 'button', text: 'Retry', onclick: () => store.dispatch({ type: Events.LOAD_MANAGER_CATALOG_PAGE, page: nextPage }) });
@@ -473,11 +492,9 @@ export function createManager({ store }) {
         let lineup = others;
         if (included && rule) {
             // Freeze the current membership, minus the one being removed.
-            const page = sel.catalogPage(state, source);
-            const catalog = page.loadedPages.length > 0 ? page.channels : (state.catalog?.[source] || []);
-            const swept = catalog
+            const swept = state.allChannels
+                .filter((c) => c.source === source)
                 .filter((c) => c.id !== channel.id)
-                .filter((c) => state.allChannels.some((live) => live.id === c.id))
                 .map((c) => c.id.slice(source.length + 1));
             swept.forEach((id) => picks.add(id));
             lineup = others.filter((entry) => !(entry.source === source && !entry.ids && !entry.names));

@@ -1,4 +1,4 @@
-# Stashy adapter prototype (StashIP-TV 1.2.1)
+# Native app adapter (StashIP-TV 1.5.0)
 
 The optional adapter exposes the existing StashIP-TV live channels as a separate,
 read-only Stash library. Stashy can browse one virtual scene per channel using
@@ -47,9 +47,47 @@ queries. It does not forward the client's GraphQL operations to Stash.
 
 ## Prototype scope and validation
 
+### Native dashboards and saved channel filters (1.5.0)
+
+The adapter now returns a virtual **StashIP-TV Live** saved SCENES filter plus
+one saved filter per currently playable channel. `findSavedFilters` and
+`findSavedFilter` expose both modern `object_filter` / `find_filter` fields and
+the legacy JSON criteria. A channel filter matches its stable `code`, so a
+rename, renumbering or programme transition cannot select a different channel.
+Empty/hidden/unselected channels do not become per-channel dashboard filters.
+Nothing is written into the actual Stash database.
+
+For an existing installation: update the plugin, stop/start IPTV, then reload
+saved filters or reconnect the app to the existing `/stashy` connection.
+
+In the inspected current **Stashy iOS** source:
+
+1. Switch to the additional **StashIP-TV Live** server connection.
+2. Open **Settings → Dashboard** and enable the **Channels** dashboard row.
+3. In the **Channels** settings section, enable the desired saved channel filters
+   and arrange them. Stashy synchronizes these from `findSavedFilters`.
+4. Open the dashboard channel. Stashy opens its filtered scene feed; the one
+   virtual scene represents the live channel and plays its HLS stream.
+
+The Channels row is a **Stashy+** feature in that source revision. Availability
+depends on the installed app version and entitlement. Without that row, the
+adapter's normal Scenes catalogue and scene-based dashboard rows remain usable.
+This does not install a new dashboard widget or bypass app feature restrictions.
+tvOS/Android dashboard layouts are app-specific and are not assumed identical.
+
+The adapter also provides `configuration.ui.frontPageContent` referencing the
+all-live saved filter for clients that import Stash homepage filters. These are
+API responses from the additional connection, not JavaScript or a modification
+of the original server's homepage. App caches still need refreshing for new
+names and programmes. No live title push or new browser player is introduced.
+
+Source contract:
+[Stashy HomeChannelsRowView.swift](https://github.com/1letzgo/stashy/blob/7a26a580e4b8aacf465e8097f67c72f8eb6bf98b/stashy/Home/HomeChannelsRowView.swift),
+[DashboardSettingsView.swift](https://github.com/1letzgo/stashy/blob/7a26a580e4b8aacf465e8097f67c72f8eb6bf98b/stashy/Settings/DashboardSettingsView.swift).
+
 The adapter supports the version probe, scene list/detail, scene pagination and
-text search, common scene filters, virtual studio, statistics and empty saved
-filter/other catalogue results. Unsupported filters return an explicit error.
+text search, common scene filters, virtual studio, statistics, saved dashboard
+filters and empty other catalogue results. Unsupported filters return an explicit error.
 Only the Live Scenes catalogue is intended for use; this is not a complete Stash
 server replacement. Scenes are live streams with duration/resume position 0;
 seeking and downloads are not supported. Both the primary media URL and Stashy's
@@ -105,9 +143,15 @@ filters, preferences and server scheduler are retained for both integrations.
 
 ## Mirage
 
-Mirage's public website does not establish a compatible virtual-server/plugin
-integration contract. This prototype targets the inspected Stashy iOS/tvOS
-queries; compatibility with Mirage has not been verified.
+Mirage documents saved filters and importing Stash homepage filters into its
+**For You** screen. The adapter supplies both kinds of metadata. Its website
+also describes fetching an API key through username/password authentication;
+this adapter currently uses its separate IPTV key and does not implement that
+login flow. Complete Mirage connection/playback compatibility is therefore
+**unverified**. Do not replace the normal Mirage/Stash connection on that basis.
+If the installed app can connect using an API key, test a separate adapter
+connection, then import/select **StashIP-TV Live** in For You settings. Otherwise
+further app support or its exact request/error contract is required.
 
 Sources:
 - https://github.com/1letzgo/stashy

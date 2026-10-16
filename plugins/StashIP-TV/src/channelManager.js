@@ -37,7 +37,11 @@ export function startChannelManager({ gql = createClient() } = {}) {
         if (!loaded) return;
         releaseFocus?.();
         releaseFocus = trapFocus(manager.element);
-        store.dispatch({ type: Events.MANAGER_OPEN });
+        const state = store.getState();
+        const selected = state.allChannels.filter((channel) => state.managerView !== 'active' || !state.prefs[channel.id]?.hidden);
+        const source = state.managerView !== 'all' && !selected.some((channel) => channel.source === state.managerSource)
+            ? selected[0]?.source || state.managerSource : state.managerSource;
+        store.dispatch({ type: Events.MANAGER_OPEN, source });
         manager.element.querySelector('input,button,select')?.focus();
     };
     const navbar = createNavbarButton({ onActivate: open });
@@ -74,6 +78,8 @@ export function startChannelManager({ gql = createClient() } = {}) {
             pinOrder: get(STORAGE_KEYS.pinOrder) == null ? migratePinOrder(legacy) : parsePinOrder(get(STORAGE_KEYS.pinOrder)),
             sort: migrateSort(get(STORAGE_KEYS.sort)), collapsedGroups: []
         });
+        const managerView = get(STORAGE_KEYS.managerView);
+        store.dispatch({ type: Events.SET_MANAGER_VIEW, view: ['all', 'selected'].includes(managerView) ? managerView : 'active' });
         loaded = true;
         if (settings.guide_navbar_button) navbar.start();
         // Resolve selected channels for manager actions; no playback/pool effect

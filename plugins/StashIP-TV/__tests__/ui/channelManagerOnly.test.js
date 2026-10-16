@@ -32,6 +32,8 @@ describe('channel-management-only browser entry', () => {
         expect(app.element.hidden).toBe(false);
         expect(app.store.getState().prefs['studio:1'].name).toBe('My channel');
         expect(app.store.getState().pinOrder).toEqual(['studio:1']);
+        expect(app.store.getState().managerView).toBe('active');
+        expect(gql.mock.calls.some(([, args]) => args?.find?.per_page === 50)).toBe(false);
         expect(document.querySelector('.tvguide-manager')).not.toBeNull();
         expect(document.querySelector('video')).toBeNull();
         expect(document.querySelector('.tvguide-player')).toBeNull();
@@ -53,6 +55,28 @@ describe('channel-management-only browser entry', () => {
         expect(config().iptv_04_token).toBe('keep-private-token');
         expect(config().unknown_setting).toBe('keep');
         expect(config().tvguide_state.unknown_state).toBe('keep too');
+    });
+
+    it('restores the selected view after reopening the plugin', async () => {
+        const { gql, config } = client();
+        app = startChannelManager({ gql });
+        await app.ready; await flush();
+        app.store.dispatch({ type: Events.SET_MANAGER_VIEW, view: 'selected' });
+        await flush();
+        expect(config().tvguide_state[STORAGE_KEYS.managerView]).toBe('selected');
+        app.destroy(); app = startChannelManager({ gql });
+        await app.ready; await flush();
+        expect(app.store.getState().managerView).toBe('selected');
+    });
+
+    it('opens a populated channel type when the previous type has no active channels', async () => {
+        const { gql } = client();
+        app = startChannelManager({ gql });
+        await app.ready; await flush();
+        app.store.dispatch({ type: Events.CHANNELS_LOADED, channels: [{ id: 'tag:7', source: 'tag', name: 'Live tag', sceneFilter: {}, sceneCount: 5 }] });
+        app.open();
+        expect(app.store.getState().managerSource).toBe('tag');
+        expect(app.element.querySelector('[data-channel-id="tag:7"]')).not.toBeNull();
     });
 
     it('offers an explicit rename action, saves it without changing the source and resets to the source name', async () => {

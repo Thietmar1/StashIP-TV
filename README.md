@@ -14,6 +14,9 @@ GalleryMode, SpriteTab und TheaterMode sind aus diesem Repository entfernt.
 - Gepuffertes HLS und Kanal-/Szenennamen für Stashy, ohne zusätzlichen EPG-Bildschirm.
 - Optionaler virtueller HDHomeRun-Tuner mit EPG für Plex.
 - Kanalnummern ab **12**, in den Einstellungen anpassbar.
+- Kanalverwaltung mit **Active channels**, **Selected (including hidden)** und
+  **All available channels**; die Auswahl wird gespeichert.
+- Virtuelle gespeicherte Kanalfilter für native App-Startseiten über den Adapter.
 
 Plex und Stashy bleiben als Prototypen gekennzeichnet. Ihre tatsächliche
 Client-Wiedergabe hängt auch von der jeweiligen App-Version ab. Die automatischen
@@ -270,6 +273,44 @@ Minuten aktualisiert; Stop/Start übernimmt Änderungen sofort. Die Medienanwend
 muss gegebenenfalls ihre Kanal- und EPG-Daten neu einlesen. Kanal-IDs bleiben
 stabil; die alphabetische Reihenfolge und damit Kanalnummern können sich nach
 einer Umbenennung ändern.
+
+### Aktive Kanäle verwalten
+
+Die Kanalverwaltung startet mit **Active channels**: ausgewählte Kanäle, die
+nicht ausgeblendet sind. Das ist die konfigurierte TV-Auswahl, kein Zähler gerade
+verbundener Zuschauer. Der Filter arbeitet auf der vollständigen Auswahl, auch
+wenn ein Kanal erst auf einer späteren Katalogseite liegt. Die Suche findet dort
+sowohl eigene Kanalnamen als auch ursprüngliche Namen.
+
+- **Selected (including hidden)** zeigt zusätzlich ausgeblendete ausgewählte
+  Kanäle, damit du sie wieder einblenden kannst.
+- **All available channels** öffnet den bisherigen paginierten Katalog zum
+  Hinzufügen weiterer Tags, Darsteller, Studios oder anderer Quellen.
+- Der Kanaltyp bleibt über die Typauswahl wählbar. Ansicht und Kanaländerungen
+  werden getrennt gespeichert; ein Ansichtswechsel ändert keine TV-Auswahl.
+
+### Kanäle auf nativen App-Startseiten
+
+Stashy und Mirage verwenden eigene Oberflächen. JavaScript-Kacheln auf der
+Stash-Webstartseite werden nicht in diese Apps übertragen. Die Integration
+erfolgt deshalb über die zusätzliche Adapter-Verbindung `/stashy`.
+
+Ab 1.5.0 liefert diese Verbindung den virtuellen gespeicherten Filter
+**StashIP-TV Live** und einen Filter pro aktuell spielbarem Kanal. Die Filter
+selektieren die stabilen Kanal-IDs; Namen, Nummern und laufende Szenen dürfen
+sich ändern. Im echten Stash werden dafür keine Szenen oder Filter angelegt.
+
+In aktuellen Stashy-Versionen kann die native **Channels**-Zeile diese Filter
+verwenden. Sie ist im untersuchten iOS-Quellcode eine **Stashy+**-Funktion.
+Die üblichen Szenen-Zeilen der Adapter-Verbindung funktionieren weiterhin.
+Ein Klick führt über die App zur virtuellen Live-Szene und deren HLS-Wiedergabe.
+Details und Einrichtung stehen in [NATIVE-APPS.md](plugins/StashIP-TV/NATIVE-APPS.md).
+
+Für Clients, die Stash-Startseitenfilter lesen, liefert der Adapter zusätzlich
+eine native `frontPageContent`-Definition für **StashIP-TV Live**. Mirage beschreibt
+solche Filter für **For You**. Eine vollständige Mirage-Verbindung und Wiedergabe
+sind hier nicht mit einem echten Gerät geprüft; diese Daten allein garantieren
+keine Kompatibilität mit dessen Anmeldung oder Player.
 
 ## Betrieb und Fehlerdiagnose
 

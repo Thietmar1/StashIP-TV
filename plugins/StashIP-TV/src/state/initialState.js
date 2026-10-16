@@ -83,6 +83,7 @@ export function createInitialState() {
         // makes the per-group A-Z rails mean anything.
         managerSort: DEFAULT_SORT,
         managerOpen: false,
+        managerView: 'all',
         managerSearch: '',
         managerCatalogFavorited: false,
         managerCatalogGender: 'all',

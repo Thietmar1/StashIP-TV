@@ -4,6 +4,7 @@ import {
     parse, validate, visit, GraphQLError
 } from 'graphql';
 import { endpoint } from './config.js';
+import { dashboardFilters, dashboardConfiguration } from './appDashboard.js';
 
 export const adapterSceneId = (channelId) => `tvguide-${Buffer.from(channelId).toString('base64url')}`;
 
@@ -56,7 +57,7 @@ function matches(scene, filter) {
         if (field === 'duration') return compare(0, value);
         if (field === 'file_count') return compare(1, value);
         if (['tag_count', 'performer_count', 'stash_id_count'].includes(field)) return compare(0, value);
-        if (['title', 'details', 'date', 'created_at', 'updated_at', 'rating100', 'o_counter', 'play_count', 'play_duration', 'resume_time'].includes(field)) return compare(scene[field], value);
+        if (['code', 'title', 'details', 'date', 'created_at', 'updated_at', 'rating100', 'o_counter', 'play_count', 'play_duration', 'resume_time'].includes(field)) return compare(scene[field], value);
         return fail(`Scene filter '${field}' is not supported by the live adapter.`);
     });
 }
@@ -174,11 +175,12 @@ export function createStashyAdapter(config, { gql, getGuide, now = Date.now, boo
         }
         let scenePromise;
         const all = () => (scenePromise ||= virtualScenes());
+        const filters = async () => dashboardFilters(await all());
         const studio = async () => ({ id: 'tvguide-live', name: 'StashIP-TV Live', scene_count: (await all()).length, image_path: '' });
         const roots = {
             version: () => ({ version, hash: 'tvguide-adapter', build_time: '' }),
             systemStatus: () => ({ status: 'OK' }),
-            configuration: () => ({ general: { stashes: [], stashBoxes: [] }, defaults: {}, plugins: {} }),
+            configuration: () => ({ general: { stashes: [], stashBoxes: [] }, defaults: {}, plugins: {}, ui: dashboardConfiguration() }),
             stats: async () => ({ scene_count: (await all()).length, studio_count: 1 }),
             findScenes: async (args) => pageScenes(await all(), args),
             findScene: async ({ id }) => (await all()).find((scene) => scene.id === id) || null,
@@ -186,7 +188,8 @@ export function createStashyAdapter(config, { gql, getGuide, now = Date.now, boo
             findStudios: async ({ ids }) => ({ count: ids && !ids.includes('tvguide-live') ? 0 : 1, studios: ids && !ids.includes('tvguide-live') ? [] : [await studio()] }),
             findStudio: async ({ id }) => id === 'tvguide-live' ? studio() : null,
             allStudios: async () => [await studio()],
-            findSavedFilters: () => [], findSavedFilter: () => null,
+            findSavedFilters: async ({ mode } = {}) => mode && mode !== 'SCENES' ? [] : filters(),
+            findSavedFilter: async ({ id }) => (await filters()).find((filter) => filter.id === id) || null,
             findPerformers: () => ({ count: 0, performers: [] }), findTags: () => ({ count: 0, tags: [] }),
             findGroups: () => ({ count: 0, groups: [] }), findMovies: () => ({ count: 0, movies: [] }),
             findImages: () => ({ count: 0, images: [] }), findGalleries: () => ({ count: 0, galleries: [] }),
