@@ -93,6 +93,36 @@ test('a failed source does not publish a partial lineup', async () => {
     await assert.rejects(loadGuide(fixture({ fail: true }).gql), /complete/);
 });
 
+test('the persisted studio checkbox controls the shared live/EPG pool, including deeper descendants', async () => {
+    for (const includeSubStudios of [undefined, true, false]) {
+        const criteria = [];
+        const pref = includeSubStudios === undefined ? {} : { includeSubStudios };
+        const gql = async (query, variables) => {
+            if (query.includes('Configuration')) return { configuration: { plugins: { TVGuide: { tvguide_state: {
+                tvguide_lineup: JSON.stringify([{ source: 'studio', ids: ['1'] }]),
+                tvguide_channel_prefs: JSON.stringify({ 'studio:1': { ...pref, name: 'Parent TV' } })
+            } } } } };
+            if (query.includes('TVGuideStudios')) return { findStudios: { studios: [{ id: '1', name: 'Parent', scene_count: 1 }] } };
+            const filter = variables.filter.studios;
+            criteria.push(filter);
+            const scenes = filter.depth === 0 ? [scene('parent', 60)] : [scene('parent', 60), scene('child', 60), scene('grandchild', 60)];
+            if (query.includes('SceneCount')) return { findScenes: { count: scenes.length } };
+            return { findScenes: { scenes } };
+        };
+        const guide = await loadGuide(gql);
+        const channel = guide.channels[0];
+        assert.equal(channel.id, 'studio:1');
+        assert.equal(channel.name, 'Parent TV');
+        const plan = await guide.getPlan(channel, at);
+        assert.equal(plan.totalMs, includeSubStudios === false ? 60000 : 180000);
+        assert.ok(criteria.every((filter) => filter.depth === (includeSubStudios === false ? 0 : -1)));
+        const xml = await renderXmltv(guide, guide.channels, config, at, at + 180000);
+        assert.equal(xml.includes('<title>Scene child</title>'), includeSubStudios !== false);
+        assert.equal(xml.includes('<title>Scene grandchild</title>'), includeSubStudios !== false);
+        assert.ok(renderM3u(await playableChannels(guide, at), config).includes('tvg-id="studio:1"'));
+    }
+});
+
 test('plans share concurrent loads, retry failures and rotate at the next local day', async () => {
     const { gql, calls } = fixture();
     let failing = true;

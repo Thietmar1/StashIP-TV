@@ -9,3 +9,5 @@
 .tvguide-manager-name-form { flex: 1 1 100%; min-width: 0; max-width: 100%; }
 .tvguide-manager-name-form button { margin: 6px 8px 0 0; }
 .tvguide-manager-name-help { color: var(--tvguide-text-dim); font-size: .85em; margin: 6px 0; }
+.tvguide-manager-substudios { display: inline-flex; align-items: center; gap: 6px; margin: 0; cursor: pointer; }
+.tvguide-manager-substudios input { margin: 0; }

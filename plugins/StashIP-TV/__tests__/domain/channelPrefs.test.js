@@ -156,6 +156,24 @@ describe('predicates', () => {
 });
 
 describe('applyPrefs', () => {
+    it('persists explicit false for sub-studios and restores the compatible default when reset', () => {
+        const prefs = setPref({}, 'studio:1', { includeSubStudios: false });
+        expect(parsePrefs(serializePrefs(prefs))).toEqual({ 'studio:1': { includeSubStudios: false } });
+        expect(setPref(prefs, 'studio:1', { includeSubStudios: true })['studio:1'].includeSubStudios).toBe(true);
+        expect(setPref(prefs, 'studio:1', { includeSubStudios: null })).toEqual({});
+        expect(validatePrefs({ 'studio:1': { includeSubStudios: 'false' } })).toEqual({});
+    });
+
+    it('limits only the configured studio channel to direct scenes and leaves raw filters intact', () => {
+        const studio = { ...chan('studio:1', 'Parent'), sceneFilter: { studios: { value: ['1'], modifier: 'INCLUDES', depth: -1 }, organized: true } };
+        const tag = { ...chan('tag:1', 'Tag', 3, 'tag'), sceneFilter: { tags: { value: ['1'], modifier: 'INCLUDES', depth: -1 } } };
+        const [direct, unchanged] = applyPrefs([studio, tag], { 'studio:1': { includeSubStudios: false }, 'tag:1': { includeSubStudios: false } });
+        expect(direct.sceneFilter).toEqual({ studios: { value: ['1'], modifier: 'INCLUDES', depth: 0 }, organized: true });
+        expect(studio.sceneFilter.studios.depth).toBe(-1);
+        expect(unchanged).toBe(tag);
+        expect(applyPrefs([studio], {})[0]).toBe(studio);
+        expect(applyPrefs([studio], { 'studio:1': { includeSubStudios: true } })[0].sceneFilter.studios.depth).toBe(-1);
+    });
     const channels = [chan('studio:1', 'Long Studio Name'), chan('studio:2', 'Other')];
 
     it('renames a channel', () => {
