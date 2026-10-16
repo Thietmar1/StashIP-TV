@@ -1,6 +1,6 @@
 name: Funscript Ollama
 description: Experimental Qwen-guided optical motion analysis. Creates a single-axis funscript next to tagged videos.
-version: "0.1.0"
+version: "0.1.1"
 url: https://github.com/Thietmar1/StashIP-TV/tree/main/plugins/FunscriptOllama
 exec:
   - python
