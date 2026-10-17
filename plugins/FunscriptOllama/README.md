@@ -1,4 +1,4 @@
-# Funscript Ollama (Prototyp 0.3.1)
+# Funscript Ollama (Prototyp 0.4.0)
 
 Eigenständiges Stash-Plugin, inspiriert vom Tag-Ablauf von
 [FunscriptHaven](https://github.com/stashapp/CommunityScripts/tree/main/plugins/FunscriptHaven).
@@ -94,15 +94,21 @@ zusätzliche Achsen ergänzt werden, ohne die Hauptdatei zu überschreiben.
 ## Was Qwen übernimmt
 
 In den Ollama-Modi ist der voreingestellte Server **`http://192.168.178.16:11434`**. Qwen erhält zu
-Beginn, nach erkannten Schnitten und etwa alle 30 Sekunden zwei verkleinerte
+Beginn, nach erkannten Schnitten und standardmäßig alle 15 Sekunden zwei verkleinerte
 JPEG-Bilder. Das Modell wählt einen Bildbereich und eine horizontale oder
 vertikale Bewegungsachse. OpenCV misst anschließend die tatsächliche Bewegung
-zwischen den Bildern, standardmäßig mit ungefähr 15 Auswertungen pro Sekunde.
-Die Bildbreite beträgt höchstens 512 Pixel; es wird kein vollständiges Video
+zwischen den Bildern, standardmäßig mit einer Zielrate von 30 Auswertungen pro Sekunde.
+Bei inaktiven Bereichen erfolgt die nächste KI-Prüfung schon nach 5 Sekunden.
+Die Bilder für die KI liegen möglichst 0,25 Sekunden auseinander, unabhängig von
+der lokalen Messrate. Direkt am Anfang und nach einem Schnitt kann der Abstand
+kürzer sein. Ein begrenzter RAM-Puffer hält höchstens 128 verkleinerte Bilder;
+Bildpaare werden nie über einen erkannten Schnitt hinweg gebildet.
+Die längste Bildkante beträgt höchstens 512 Pixel; es wird kein vollständiges Video
 an Ollama geschickt und es werden keine Vorschaubilder gespeichert.
 
 Die gemessene Bewegung wird integriert, von langsamer Drift bereinigt, auf
-0–100 normalisiert und auf Wendepunkte reduziert. Die Ausgabe begrenzt außerdem
+0–100 normalisiert und standardmäßig als dichte Folge ausgegeben. Die optionale
+Wendepunktreduktion bleibt verfügbar. Die Ausgabe begrenzt außerdem
 die Positionsänderung pro Sekunde, einschließlich Übergängen zwischen Abschnitten.
 Qwen erzeugt **keine Zeitstempel oder fertigen Bewegungsfolgen**. Bildanalyse
 über die [Ollama Vision API](https://docs.ollama.com/capabilities/vision) und
@@ -310,7 +316,7 @@ Das Plugin erfindet keine Kapitelbezeichnungen aus Modellantworten. Ohne bereits
 vorhandene Kapitel oder Stash-Marker gibt es keine inhaltlichen Kapitel zu
 importieren/exportieren; der optionale Abschlussmarker ist davon unabhängig.
 
-## Empfohlenes Startprofil
+## Empfohlenes Detailprofil (ab 0.4.0)
 
 Die neuen Standardwerte stehen auch in [recommended-settings.json](recommended-settings.json).
 Die Aufgabe **Apply Recommended Generation Settings** speichert dieses Profil
@@ -321,15 +327,56 @@ bleiben erhalten. Die Aufgabe analysiert keine Videos und stellt keine Ollama-An
 Bereits gespeicherte Werte bleiben bei einem normalen Plugin-Update erhalten;
 das Profil wird erst durch die ausdrückliche Aufgabe übernommen.
 
-Als Ausgangspunkt kombiniert `ollama_haven` Qwens Bereichsauswahl mit Havens
-Bewegungsmessung. 15 Messungen pro Sekunde erfassen mehr Bewegungsdetails als
-der bisherige Standard mit 10. Die Bereichsauswahl wird alle 30 Sekunden und
-nach erkannten Schnitten erneuert. Driftbereinigung über 2 Sekunden, lokale
-Normalisierung über 4 Sekunden und die Reduktion auf Wendepunkte bleiben aktiv.
-Die Begrenzung auf 150 Positionspunkte pro Sekunde glättet abrupte Änderungen.
-Diese Werte sind ein Startprofil; eine Qualitätsprüfung an echtem Videomaterial
-steht noch aus. Perspektive, Kamerabewegung und Geschwindigkeit können andere
-Werte oder den gerichteten Modus `ollama` erfordern.
+Als Ausgangspunkt kombiniert `ollama_haven` die KI-Bereichsauswahl mit Havens
+Bewegungsmessung. Das Profil erhält mehr gemessene Details als das frühere
+sparsamere Profil:
+
+| Vorgabe | Bis 0.3.1 | Ab 0.4.0 |
+| --- | ---: | ---: |
+| Lokale Zielrate | 15/s | 30/s, begrenzt durch die Quelldatei |
+| Aktiven KI-Bereich neu prüfen | 30 s | 15 s |
+| Inaktiven KI-Bereich neu prüfen | 30 s | 5 s |
+| Zeitabstand der KI-Bilder | Benachbarte Messbilder | Möglichst 0,25 s |
+| Wendepunktreduktion | an | aus, dichte Ausgabe |
+| Glättung nach Normalisierung | fest 0,15 s | einstellbar, 0,05 s |
+| Mindestbereich integrierter Bewegung | fest 0,5 | einstellbar, 0,25 |
+| Maximale Positionsänderung | 150/s | 300/s |
+
+Driftbereinigung über 2 Sekunden und lokale Normalisierung über 4 Sekunden
+bleiben erhalten. Eine dichte Ausgabe bewahrt auch den Verlauf zwischen
+Wendepunkten; das bloße Hinzufügen interpolierter Punkte wäre kein zusätzlicher
+Messwert. Geringere Glättung und eine niedrigere Mindestschwelle erhalten kürzere
+und kleinere Signale, können aber auch mehr Bildrauschen übernehmen.
+Inaktive oder unsichere KI-Bewertungen werden weiterhin nicht künstlich aktiviert.
+
+Die Grenze 300 betrifft Positionseinheiten im Skript, keine kalibrierte physische
+Gerätegeschwindigkeit. Die tatsächliche Bewegung hängt weiterhin von Player,
+Gerät und dessen Begrenzungen ab. Kamerafahrten, falsche Bildbereiche und
+Verdeckungen lassen sich nicht allein durch höhere Empfindlichkeit beheben.
+Eine punktgenaue Übereinstimmung mit dem Video ist mit diesen Vorgaben nicht
+nachgewiesen; dafür sind zeitlich bekannte Videoausschnitte und ein synchroner
+Vergleich erforderlich. Dateigröße ist kein Qualitätsnachweis und hängt auch
+von JSON-Formatierung und Metadaten ab.
+
+**Laufzeit:** Bei durchgehend aktiver Erkennung verursacht das 15-Sekunden-
+Intervall ungefähr doppelt so viele KI-Aufrufe wie bisher. Inaktive Bereiche
+werden noch häufiger geprüft. Auf einem CPU-basierten Ollama-Server mit langsamen
+Bildantworten kann das mehrere zusätzliche Stunden bedeuten. Die lokale
+30-Hz-Messung benötigt ebenfalls mehr Rechenzeit. Für die bisherige Laufzeit
+lassen sich die Intervalle manuell auf 30 Sekunden zurückstellen.
+
+Neue Dateien enthalten unter `metadata.generation_settings` die verwendeten
+Analyseoptionen ohne Serveradressen, Kontoverzeichnisse und Tag-Namen. Die
+Bereichseinträge nennen den tatsächlichen Abstand der KI-Bilder (`frame_gap_ms`).
+So lassen sich spätere Ergebnisse nachvollziehbar vergleichen. Quellen mit
+weniger Bildern pro Sekunde werden nicht künstlich hochgerechnet.
+
+Vorhandene `.funscript`-Dateien werden durch das Profil nicht nachträglich
+umgerechnet. Für eine ausdrücklich gewünschte Neuberechnung die bestehende
+Datei sichern/umbenennen oder **Overwrite Existing Funscript** einschalten;
+der Überschreibmodus erstellt zusätzlich ein Backup. Nach Änderungen der
+Analyseoptionen passen ältere Wiederaufnahmedateien möglicherweise nicht mehr;
+sie werden zur manuellen Prüfung erhalten und nicht ungeprüft übernommen.
 
 Zusatzachsen bleiben aus, da ihre synthetischen Kurven keine zusätzliche
 gemessene Bewegungsinformation liefern. POV nur bei passender Perspektive
@@ -346,10 +393,12 @@ angeordneten Bildern; bei übereinander angeordneten Bildern `tb` wählen.
 | ChatGPT CLI Model | leer | CLI-Standard oder bildfähiges Modell des ChatGPT-Kontos |
 | Gemini CLI Model | leer | CLI-Standard oder verfügbarer Modellname/Alias |
 | CLI Account Directory | leer | Normale CLI-Verzeichnisse; optional eigener persistenter absoluter Ordner |
-| Analysis Frames Per Second | 15 | Zielrate der optischen Messung; 2–30 |
-| AI Region Refresh Seconds | 30 | Neue Bildbereichsauswahl; 2–120 Sekunden |
+| Analysis Frames Per Second | 30 | Zielrate der optischen Messung; 2–30 |
+| AI Region Refresh Seconds | 15 | Aktiven Bildbereich neu prüfen; 2–120 Sekunden |
+| Inactive AI Region Recheck Seconds | 5 | Inaktiven Bereich früher neu prüfen; 2–120, höchstens aktives Intervall |
+| AI Frame Pair Spacing Seconds | 0.25 | Abstand der KI-Bilder; 0,05–2 Sekunden, RAM-Puffer begrenzt |
 | AI Request Timeout Seconds | 10800 | 3 Stunden je Ollama-Anfrage oder CLI-Bildaufruf; 10–10800 |
-| Maximum Position Change Per Second | 150 | Begrenzung für Werte von 0–100; 10–500 |
+| Maximum Position Change Per Second | 300 | Begrenzung für Werte von 0–100; 10–500 |
 | Overwrite Existing Funscript | aus | Vor Überschreiben immer Sicherung erstellen |
 | Processing Engine | `ollama_haven` | `ollama`, `haven` oder `ollama_haven` |
 | Motion Worker Threads | 2 | Parallele optische Messungen; 1–32 |
@@ -357,7 +406,9 @@ angeordneten Bildern; bei übereinander angeordneten Bildern `tb` wählen.
 | Maximum Queued Frame Pairs | 32 | Maximale wartende Bildpaare; 1–3000 |
 | Detrend Window Seconds | 2 | Driftbereinigung; 1–10 |
 | Normalization Window Seconds | 4 | Lokale Bereichskalibrierung; 1–10 |
-| Reduce Keyframes | an | Aus schalten für alle gemessenen Punkte |
+| Reduce Keyframes | aus | Dichte Ausgabe; einschalten für Wendepunktreduktion |
+| Motion Smoothing Seconds | 0.05 | Mittelung nach Normalisierung; 0–1 Sekunden, 0 deaktiviert sie |
+| Minimum Measured Motion Range | 0.25 | 5.–95. Perzentilbereich integrierter, driftbereinigter Bewegung; 0,01–5 |
 | POV Mode | aus | Radialmessung vom unteren Mittelpunkt |
 | Balance Global Motion | an | Modusabhängige Kamerakompensation/Gewichtung |
 | Detect VR Tags | an | Tag-basierte VR-Erkennung |
