@@ -1,6 +1,6 @@
 name: Funscript Ollama
 description: Experimental Ollama, ChatGPT CLI or Antigravity CLI vision with Haven motion analysis, VR/POV, extra axes and chapter markers.
-version: "0.5.0"
+version: "0.5.1"
 url: https://github.com/Thietmar1/StashIP-TV/tree/main/plugins/FunscriptOllama
 exec:
   - python

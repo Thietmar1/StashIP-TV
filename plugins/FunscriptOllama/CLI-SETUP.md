@@ -26,6 +26,11 @@ Ohne **CLI Account Directory** bleibt Codex bei seinem normalen Profil. Antigrav
 
 **Test Selected AI Provider** einmal starten: Das Plugin legt das reservierte Profil und seine Berechtigungsdatei an, bevor es die CLI testet. Scheitert die Anmeldung, anschließend mit genau diesem Profil interaktiv anmelden und erneut testen. Das Profil ausschließlich für das Plugin verwenden; keine Erweiterungen dort installieren.
 
+Ab **0.5.1** akzeptiert die Profilprüfung auch die von `agy` beim Speichern
+weggelassene Standardeinstellung `allowNonWorkspaceAccess=false` und leere
+MCP-Konfigurationsdateien. Bei diesem Fehler in 0.5.0 das Plugin aktualisieren;
+die bestehende Anmeldung und das Profil müssen nicht gelöscht werden.
+
 Das Profil verwendet `strict` und sperrt Shell-/Schreib-/Web-/MCP-Aktionen. API-Modus, eigene MCP-Server, Hooks, Plugins oder geänderte Sicherheitsregeln führen zum Abbruch. Persönliche IDE-Einstellungen werden nicht überschrieben. Zur Reparatur in `<Profil>/.gemini/antigravity-cli/settings.json` folgende Regeln setzen und eigene Erweiterungen aus diesem reservierten Profil entfernen:
 
 ```json

@@ -25,7 +25,7 @@ from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 PLUGIN_ID = "FunscriptOllama"
-VERSION = "0.5.0"
+VERSION = "0.5.1"
 DEFAULTS = {
     "ai_provider": "ollama", "codex_path": "codex", "antigravity_path": "agy",
     "codex_model": "", "antigravity_model": "", "cli_account_dir": "",
