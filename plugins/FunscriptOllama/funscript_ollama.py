@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import base64
 import gc
+import hashlib
 from concurrent.futures import ThreadPoolExecutor
 import json
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 import sys
 import tempfile
@@ -22,7 +24,7 @@ from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 PLUGIN_ID = "FunscriptOllama"
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 DEFAULTS = {
     "ai_provider": "ollama", "codex_path": "codex", "gemini_path": "gemini",
     "codex_model": "", "gemini_model": "", "cli_account_dir": "",
@@ -548,6 +550,62 @@ def save_script(path, script, overwrite=False, log=None):
         Path(temporary).unlink(missing_ok=True)
 
 
+def recovery_context(path, scene_id, settings, vr):
+    """Bind completed analysis to the source and its analysis options, not credentials."""
+    stat = path.stat()
+    keys = ("engine", "ai_provider", "model", "codex_model", "gemini_model", "analysis_fps",
+            "roi_interval", "max_speed", "detrend_window", "norm_window", "keyframe_reduction",
+            "pov_mode", "balance_global", "vr_auto", "vr_tags", "vr_layout", "smart_limit",
+            "auto_home_delay", "auto_home_duration")
+    options = json.dumps({k: settings[k] for k in keys}, sort_keys=True, allow_nan=False)
+    return {"format": 1, "scene_id": str(scene_id), "source": str(path.resolve()),
+            "size": stat.st_size, "mtime_ns": stat.st_mtime_ns, "vr": vr,
+            "analysis_sha256": hashlib.sha256(options.encode("utf-8")).hexdigest()}
+
+
+def load_recovery(path, expected):
+    from chapters import load_script
+    saved = load_script(path)
+    if saved.get("context") != expected:
+        raise ValueError("Recovery file does not match this scene, source or analysis settings; preserved for manual review")
+    script = saved.get("script")
+    actions = script.get("actions") if isinstance(script, dict) else None
+    if not isinstance(actions, list) or not actions:
+        raise ValueError("Recovery file has no valid actions; preserved for manual review")
+    last = -1
+    for action in actions:
+        if (not isinstance(action, dict) or type(action.get("at")) is not int or action["at"] <= last
+                or type(action.get("pos")) not in (int, float) or not math.isfinite(action["pos"])
+                or not 0 <= action["pos"] <= 100):
+            raise ValueError("Recovery file contains invalid actions; preserved for manual review")
+        last = action["at"]
+    return script
+
+
+def is_stash_auth_error(exc):
+    # stashapp-tools raises a plain Exception, without a status attribute.
+    return bool(re.match(r"(?:401|403)\b.*\bquery failed\b", str(exc), re.IGNORECASE))
+
+
+def connect_stash(connection, log):
+    from stashapi.stashapp import StashInterface
+    # Exchange the task's short-lived session for Stash's existing API key at
+    # startup. This is Stash-local authentication, independent of AI providers.
+    stash = StashInterface(connection, force_api_key=True)
+    cookies = stash.s.cookies.copy()
+    stash.s.cookies.clear()
+    try:
+        stash.stash_version()  # Verify durable access before spending hours on analysis.
+    except Exception as exc:
+        stash.s.cookies.update(cookies)
+        if is_stash_auth_error(exc):
+            raise RuntimeError("Stash requires a persistent API key for long-running tasks. Generate an API key in Stash Settings > Security, then start the task again. Do not paste the key into AI settings or logs.") from None
+        raise
+    mode = "API key" if stash.s.headers.get("ApiKey") else "server without session authentication"
+    log.info(f"Step OK: Persistent Stash connection verified ({mode}); no expiring task cookie")
+    return stash
+
+
 class SceneQueue:
     def __init__(self, stash, settings):
         self.stash, self.settings = stash, settings
@@ -648,9 +706,7 @@ def import_existing(stash, settings, log, all_scenes=False):
 def process_queue(stash, settings, log):
     from chapters import load_script, export_chapters
     from cli_vision import ProviderUnavailableError
-    ollama = None if settings["engine"] == "haven" else vision_client(settings, log)
-    if ollama:
-        ollama.check_model()
+    ollama = None  # A recovery/existing sidecar needs no AI connection.
     queue = SceneQueue(stash, settings)
     scenes = queue.scenes()
     summary = {"created": 0, "skipped": 0, "failed": 0}
@@ -675,16 +731,37 @@ def process_queue(stash, settings, log):
                 summary["skipped"] += 1
                 log.info(f"Scene {scene['id']}: existing script preserved; queue tag retained")
                 continue
-            log.info(f"Scene {scene['id']}: analyzing video with {settings['engine']} engine; provider={settings['ai_provider'] if ollama else 'none'}")
-            script = analyze_video(path, settings, ollama,
-                                   lambda value: log.progress((i+value)/len(scenes)),
-                                   vr=vr_scene(scene, settings), log=log)
+            pending = output.with_name("." + output.name + ".pending.json")
+            vr = vr_scene(scene, settings)
+            context = recovery_context(path, scene["id"], settings, vr)
+            if pending.exists():
+                script = load_recovery(pending, context)
+                log.info(f"Scene {scene['id']}: Step OK: Completed analysis recovered locally; no AI requests or video analysis")
+            else:
+                if settings["engine"] != "haven" and ollama is None:
+                    try:
+                        ollama = vision_client(settings, log)
+                        ollama.check_model()
+                    except Exception as exc:
+                        raise ProviderUnavailableError(str(exc)) from None
+                log.info(f"Scene {scene['id']}: analyzing video with {settings['engine']} engine; provider={settings['ai_provider'] if ollama else 'none'}")
+                script = analyze_video(path, settings, ollama,
+                                       lambda value: log.progress((i+value)/len(scenes)), vr=vr, log=log)
+                if recovery_context(path, scene["id"], settings, vr) != context:
+                    raise ValueError("Source file changed during analysis; no result published")
+                # Persist before chapter/marker/tag calls can fail or expire.
+                save_script(pending, {"context": context, "script": script})
+                log.info(f"Scene {scene['id']}: Step OK: Completed analysis saved locally for recovery")
             if settings["export_chapters"]:
                 previous = load_script(output) if output.exists() else None
                 export_chapters(stash, scene["id"], script, previous)
                 log.info(f"Scene {scene['id']}: Step OK: Chapter export completed; {len(script.get('metadata', {}).get('chapters', []))} chapters")
             save_script(output, script, settings["overwrite"], log=log)
             log.info(f"Scene {scene['id']}: Step OK: Primary script saved; {len(script['actions'])} actions")
+            try:
+                pending.unlink(missing_ok=True)
+            except OSError:
+                log.info(f"Scene {scene['id']}: Primary script saved; recovery file could not be removed")
             secondary_scripts(path, script, settings, log)
             marker_steps(stash, scene["id"], script, settings, log)
             queue.status(scene["id"], True)
@@ -694,11 +771,17 @@ def process_queue(stash, settings, log):
         except Exception as exc:
             summary["failed"] += 1
             log.error(f"Scene {scene['id']}: {exc}")
-            try:
-                queue.status(scene["id"], False)
-                log.info(f"Scene {scene['id']}: Error status saved; queue tag retained")
-            except Exception as tag_exc:
-                log.error(f"Could not update error tag: {tag_exc}")
+            auth_failed = is_stash_auth_error(exc)
+            if not auth_failed:
+                try:
+                    queue.status(scene["id"], False)
+                    log.info(f"Scene {scene['id']}: Error status saved; queue tag retained")
+                except Exception as tag_exc:
+                    auth_failed = is_stash_auth_error(tag_exc)
+                    log.error(f"Could not update error tag: {tag_exc}")
+            if auth_failed:
+                log.error("Stash authentication failed; stopping this task. Existing scripts, recovery files and remaining queue tags are retained. Check the Stash API key and restart the task")
+                break
             if isinstance(exc, ProviderUnavailableError):
                 log.error("AI provider unavailable; stopping this task. Remaining scenes and queue tags are retained")
                 break
@@ -710,12 +793,10 @@ def process_queue(stash, settings, log):
 
 
 def run(payload, stash_factory=None, log=None):
-    if stash_factory is None:
-        from stashapi.stashapp import StashInterface
-        stash_factory = StashInterface
     if log is None:
         import stashapi.log as log
-    stash = stash_factory(payload["server_connection"])
+    stash = (connect_stash(payload["server_connection"], log) if stash_factory is None else
+             stash_factory(payload["server_connection"]))
     log.info(f"Step OK: Stash client initialized; Funscript Ollama {VERSION}")
     mode = payload.get("args", {}).get("mode", "process_scenes")
     if mode == "apply_recommended":
