@@ -2,15 +2,15 @@
   name: StashIP-TV
   metadata:
     description: StashIP-TV live channels and EPG for Jellyfin, Stashy, Plex and Emby.
-  version: "1.5.2-eecfd76ab6b8"
-  date: "2026-10-17 05:55:32"
+  version: "1.5.2-808e019d4127"
+  date: "2026-10-17 12:05:39"
   path: StashIP-TV.zip
-  sha256: 8508060dcf9b83f2bf8a65bee7d72f34b35a12974effe3f353925127240a90d4
+  sha256: dd98278340a72164bdb315ef08aa1afd5560b5a8a990da515cbf2851ff853b75
 - id: FunscriptOllama
   name: Funscript Ollama
   metadata:
     description: Ollama or account-based ChatGPT/Gemini CLI vision with Haven motion, VR, extra axes and chapters.
-  version: "0.3.1-eecfd76ab6b8"
-  date: "2026-10-17 05:55:32"
+  version: "0.4.0-808e019d4127"
+  date: "2026-10-17 12:05:39"
   path: FunscriptOllama.zip
-  sha256: c0f501dd1292028f42364a3f5a224cf868d0e314016b16d1dd83a1367439d0de
+  sha256: 1842675832e474862ede594bce4982ecd08f477b4a7119f4f7fdac8e93e07b6b
