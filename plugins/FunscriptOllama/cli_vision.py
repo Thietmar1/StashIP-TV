@@ -63,14 +63,14 @@ def prepare_antigravity_profile(settings):
     if not config.exists():
         try:
             with config.open("x", encoding="utf-8") as target:
-                json.dump({"toolPermission": "strict", "allowNonWorkspaceAccess": False,
+                json.dump({"toolPermission": "request-review", "allowNonWorkspaceAccess": False,
                            "permissions": {"deny": ANTIGRAVITY_DENY, "allow": [], "ask": []}}, target)
         except FileExistsError:
             pass
     try:
         value = json.loads(config.read_text(encoding="utf-8-sig"))
         deny = value.get("permissions", {}).get("deny", [])
-        if (value.get("modelProvider") or value.get("toolPermission") != "strict"
+        if (value.get("modelProvider") or value.get("toolPermission", "request-review") not in ("strict", "request-review")
                 or value.get("allowNonWorkspaceAccess", False) is not False
                 or not isinstance(deny, list) or not set(ANTIGRAVITY_DENY).issubset(deny)):
             raise ValueError("Unsafe profile")
@@ -91,6 +91,24 @@ def prepare_antigravity_profile(settings):
                 folder = base / name
                 if folder.exists() and any(folder.iterdir()):
                     raise ValueError("Custom profile extensions")
+        if value.get("toolPermission") == "strict":
+            # agy 1.4 can reject image reads in strict mode, even with read
+            # grants. Migrate only the reserved profile after all guards pass;
+            # explicit shell/write/web/MCP denials remain unchanged.
+            value["toolPermission"] = "request-review"
+            pending = None
+            try:
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                                 dir=config.parent, prefix=".settings-",
+                                                 suffix=".tmp", delete=False) as target:
+                    pending = Path(target.name)
+                    json.dump(value, target, indent=2)
+                    target.flush()
+                    os.fsync(target.fileno())
+                os.replace(pending, config)
+            finally:
+                if pending:
+                    pending.unlink(missing_ok=True)
     except (OSError, ValueError, TypeError, AttributeError):
         raise ProviderUnavailableError("Antigravity needs its dedicated account-only image profile; "
                                        "remove API mode, custom MCP/plugins/hooks and restore the permissions "
@@ -288,7 +306,8 @@ class CLIVision:
                 if "logged in using chatgpt" not in (out + err).lower():
                     raise ProviderUnavailableError("ChatGPT CLI needs ChatGPT account login; API-key authentication is not accepted")
         if self.log:
-            self.log.info(f"Step OK: {self.label} available; account-only mode (image test verifies model access)")
+            profile = "; image profile=request-review, shell/write/web/MCP denied" if not self.codex else ""
+            self.log.info(f"Step OK: {self.label} available; account-only mode{profile} (image test verifies model access)")
 
     def region(self, frames):
         import cv2
@@ -352,7 +371,7 @@ class CLIVision:
                     structured = envelope.get("structured_output")
                     if not isinstance(structured, dict):
                         raise ProviderUnavailableError("Antigravity CLI returned no structured image result; "
-                                                       "no output created")
+                                                       "check image-read permissions and model response; no output created")
                     text = json.dumps(structured)
 
                 try:

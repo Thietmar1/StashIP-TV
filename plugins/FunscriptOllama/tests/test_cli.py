@@ -178,6 +178,7 @@ class CLITests(unittest.TestCase):
         config = home / ".gemini/antigravity-cli/settings.json"
         value = json.loads(config.read_text())
         del value["allowNonWorkspaceAccess"]  # agy omits its false default when saving.
+        del value["toolPermission"]  # request-review is also the CLI default.
         config.write_text(json.dumps(value), encoding="utf-8")
         mcp = home / ".gemini/config/mcp_config.json"
         mcp.parent.mkdir(parents=True, exist_ok=True)
@@ -193,12 +194,47 @@ class CLITests(unittest.TestCase):
             with self.assertRaises(cli.ProviderUnavailableError):
                 cli.account_environment(settings)
 
+    def test_old_strict_profile_migrates_atomically_without_changing_denials_or_model(self):
+        settings = plugin.configuration({"ai_provider": "antigravity_cli", "cli_account_dir": str(self.root)})
+        home = cli.prepare_antigravity_profile(settings)
+        config = home / ".gemini/antigravity-cli/settings.json"
+        value = json.loads(config.read_text())
+        self.assertEqual(value["toolPermission"], "request-review")
+        value.update(toolPermission="strict", model="account-model", colorScheme="dark")
+        config.write_text(json.dumps(value), encoding="utf-8")
+        cli.prepare_antigravity_profile(settings)
+        expected = {**value, "toolPermission": "request-review"}
+        self.assertEqual(json.loads(config.read_text()), expected)
+        self.assertEqual(set(expected["permissions"]["deny"]), set(cli.ANTIGRAVITY_DENY))
+        self.assertEqual(list(config.parent.iterdir()), [config])
+        # The migrated profile must complete an actual offline image invocation.
+        self.assertTrue(plugin.vision_client(settings, self.log).region(self.frames)["active"])
+
+    def test_failed_strict_profile_migration_keeps_original_and_cleans_temporary_file(self):
+        settings = plugin.configuration({"ai_provider": "antigravity_cli", "cli_account_dir": str(self.root)})
+        home = cli.prepare_antigravity_profile(settings)
+        config = home / ".gemini/antigravity-cli/settings.json"
+        value = json.loads(config.read_text()); value["toolPermission"] = "strict"
+        config.write_text(json.dumps(value), encoding="utf-8")
+        original = config.read_bytes()
+        with patch.object(cli.os, "replace", side_effect=OSError("fixture")):
+            with self.assertRaises(cli.ProviderUnavailableError):
+                cli.prepare_antigravity_profile(settings)
+        self.assertEqual(config.read_bytes(), original)
+        self.assertEqual(list(config.parent.iterdir()), [config])
+        value["permissions"]["deny"] = []
+        config.write_text(json.dumps(value), encoding="utf-8")
+        original = config.read_bytes()
+        with self.assertRaises(cli.ProviderUnavailableError):
+            cli.prepare_antigravity_profile(settings)
+        self.assertEqual(config.read_bytes(), original)
+
     def test_reserved_profile_rejects_api_mode_hooks_mcp_and_unsafe_permissions(self):
         settings = plugin.configuration({"ai_provider": "antigravity_cli", "cli_account_dir": str(self.root)})
         home = cli.prepare_antigravity_profile(settings)
         config = home / ".gemini/antigravity-cli/settings.json"
         safe = config.read_text()
-        for field, value in (("modelProvider", "gemini"), ("toolPermission", "always-proceed"),
+        for field, value in (("modelProvider", "gemini"), ("toolPermission", "always-proceed"), ("toolPermission", None),
                              ("allowNonWorkspaceAccess", True), ("permissions", {"deny": []})):
             changed = json.loads(safe)
             changed[field] = value

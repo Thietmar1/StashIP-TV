@@ -33,7 +33,7 @@ else:
     assert all("@"+p.name in prompt for p in images)
     config = json.loads((Path(os.environ["HOME"]) / ".gemini/antigravity-cli/settings.json").read_text())
     assert os.environ["HOME"] == os.environ["USERPROFILE"]
-    assert not config.get("modelProvider") and config["toolPermission"] == "strict"
+    assert not config.get("modelProvider") and config.get("toolPermission", "request-review") == "request-review"
     assert set(config["permissions"]["deny"]) >= {"command(*)", "mcp(*)", "write_file(*)", "read_url(*)"}
     assert "--approval-mode" not in args and "--disable-slash-commands" in args
     assert "--dangerously-skip-permissions" not in args
