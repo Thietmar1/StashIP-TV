@@ -1,6 +1,6 @@
 name: Funscript Ollama
-description: Experimental Ollama, ChatGPT CLI or Gemini CLI vision with Haven motion analysis, VR/POV, extra axes and chapter markers.
-version: "0.4.0"
+description: Experimental Ollama, ChatGPT CLI or Antigravity CLI vision with Haven motion analysis, VR/POV, extra axes and chapter markers.
+version: "0.5.0"
 url: https://github.com/Thietmar1/StashIP-TV/tree/main/plugins/FunscriptOllama
 exec:
   - python
@@ -8,7 +8,7 @@ exec:
 interface: raw
 tasks:
   - name: Test Selected AI Provider
-    description: Test the selected provider with two synthetic images. ChatGPT/Gemini use the installed official CLI and an existing account login, without API keys.
+    description: Test the selected provider with two synthetic images. ChatGPT/Antigravity use the installed official CLI and an existing account login, without API keys.
     defaultArgs:
       mode: test_provider
   - name: Apply Recommended Generation Settings
@@ -34,7 +34,7 @@ tasks:
 settings:
   ai_provider:
     displayName: AI Provider
-    description: "ollama (default), chatgpt_cli (official Codex CLI with ChatGPT login), or gemini_cli (official Gemini CLI with Google login). CLI providers send selected frames to the cloud and consume account quotas; no API-key fallback."
+    description: "ollama (default), chatgpt_cli (official Codex CLI with ChatGPT login), or antigravity_cli (official Antigravity CLI with Google login). CLI providers send selected frames to the cloud and consume account quotas; no API-key fallback."
     type: STRING
   codex_path:
     displayName: ChatGPT Codex CLI Path
@@ -44,17 +44,17 @@ settings:
     displayName: ChatGPT CLI Model
     description: "Empty: CLI account default. Optional exact model supported by your ChatGPT/Codex account, with image inputs. Independent of Ollama Model."
     type: STRING
-  gemini_path:
-    displayName: Gemini CLI Path
-    description: "Default: gemini from PATH. Alternatively an absolute executable path, without extra arguments. Install the official @google/gemini-cli CLI in the Stash runtime."
+  antigravity_path:
+    displayName: Antigravity CLI Path
+    description: "Default: agy from PATH. Alternatively an absolute path to the official Antigravity CLI executable (agy.exe on Windows), without extra arguments. Requires CLI 1.4+. The desktop IDE launcher is not supported."
     type: STRING
-  gemini_model:
-    displayName: Gemini CLI Model
-    description: "Empty: CLI account default. Optional image-capable model or alias available to your Google account. Independent of Ollama Model."
+  antigravity_model:
+    displayName: Antigravity CLI Model
+    description: "Empty: CLI account default. Optional exact image-capable model slug from agy models. Old Gemini aliases are not migrated. Independent of Ollama Model."
     type: STRING
   cli_account_dir:
     displayName: CLI Account Directory
-    description: "Optional absolute persistent folder. Codex uses <folder>/codex; Gemini uses <folder>/gemini/.gemini. Empty: CLI's normal account home. Complete login manually under the Stash service/container account; see README."
+    description: "Optional absolute persistent folder. Codex uses <folder>/codex. Antigravity uses a dedicated HOME at <folder>/antigravity; empty: ~/.funscript-ollama/antigravity. Complete agy login with that HOME/USERPROFILE under the Stash account. Never put MCP servers, hooks or plugins in this reserved profile; see CLI-SETUP."
     type: STRING
   engine:
     displayName: Processing Engine

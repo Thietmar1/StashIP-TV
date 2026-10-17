@@ -29,7 +29,7 @@ def package(output_dir, revision, check=False):
         f'- id: FunscriptOllama\n'
         f'  name: Funscript Ollama\n'
         f'  metadata:\n'
-        f'    description: Ollama or account-based ChatGPT/Gemini CLI vision with Haven motion, VR, extra axes and chapters.\n'
+        f'    description: Ollama or account-based ChatGPT/Antigravity CLI vision with Haven motion, VR, extra axes and chapters.\n'
         f'  version: "{version}-{revision}"\n'
         f'  date: "{date}"\n'
         f'  path: FunscriptOllama.zip\n'

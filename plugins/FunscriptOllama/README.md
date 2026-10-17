@@ -1,4 +1,4 @@
-# Funscript Ollama (Prototyp 0.4.0)
+# Funscript Ollama (Prototyp 0.5.0)
 
 Eigenständiges Stash-Plugin, inspiriert vom Tag-Ablauf von
 [FunscriptHaven](https://github.com/stashapp/CommunityScripts/tree/main/plugins/FunscriptHaven).
@@ -10,9 +10,9 @@ neben dem Video. Die lizenzierten Haven-Komponenten und Anpassungen sind in
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) dokumentiert.
 
 Ab **0.3.0** kann die Bildbereichsauswahl alternativ über **ChatGPT/Codex CLI**
-oder **Gemini CLI** erfolgen: Anmeldung mit dem eigenen Konto, ohne separat
+oder ab **0.5.0 Antigravity CLI** (Programm `agy`) erfolgen: Anmeldung mit dem eigenen Konto, ohne separat
 abgerechneten API-Schlüssel. Unter **AI Provider** `ollama`, `chatgpt_cli` oder
-`gemini_cli` eintragen. Die CLI-Anbieter senden ausgewählte Bilder in die Cloud
+`antigravity_cli` eintragen. Die CLI-Anbieter senden ausgewählte Bilder in die Cloud
 und nutzen die Kontingente des angemeldeten Kontos; sie benötigen zusätzliche
 Installation und Anmeldung im Stash-Laufzeitkonto. Sie sind noch nicht mit deinem
 Konto bzw. echtem Videomaterial geprüft.
@@ -20,6 +20,11 @@ Konto bzw. echtem Videomaterial geprüft.
 **[Einrichtung für Docker/LXC, Linux und Windows: CLI-SETUP.md](CLI-SETUP.md)**.
 Danach mit **Test Selected AI Provider** ausschließlich künstliche Bilder testen.
 Ollama bleibt Standard und behält Adresse, Modell und bisherigen Ablauf.
+
+Die alte Auswahl `gemini_cli` wird zu `antigravity_cli` migriert. Alte Gemini-
+Programmpfade und Modell-Aliase werden nicht übernommen. Antigravity verwendet
+ein eigenes Profil; Installation, Profil-Anmeldung und Test sind in CLI-SETUP
+beschrieben. Seine native Bildinferenz im Stash-Dienst ist noch nicht bestätigt.
 
 ## Lange Aufgaben, Stash-Anmeldung und Wiederaufnahme (ab 0.3.1)
 
@@ -155,7 +160,7 @@ https://raw.githubusercontent.com/Thietmar1/StashIP-TV/tvguide-iptv/index.yml
 ```
 
 Quellen aktualisieren, **Funscript Ollama** installieren und die Python-Abhängigkeiten
-wie unten beschrieben einrichten. Version 0.3.0 erscheint nach Merge und erfolgreicher
+wie unten beschrieben einrichten. Version 0.5.0 erscheint nach Merge und erfolgreicher
 Veröffentlichung dieses Updates. Die bisherige separate Quelle
 `https://raw.githubusercontent.com/Thietmar1/StashIP-TV/funscript-ollama/index.yml`
 wird aus Kompatibilitätsgründen weiter aktualisiert. Bereits installierte Plugins
@@ -387,12 +392,12 @@ angeordneten Bildern; bei übereinander angeordneten Bildern `tb` wählen.
 
 | Einstellung | Standard | Bedeutung |
 | --- | --- | --- |
-| AI Provider | `ollama` | `ollama`, `chatgpt_cli`, `gemini_cli`; siehe CLI-SETUP.md |
+| AI Provider | `ollama` | `ollama`, `chatgpt_cli`, `antigravity_cli`; siehe CLI-SETUP.md |
 | ChatGPT Codex CLI Path | `codex` | Offizielle Codex CLI im Stash-PATH oder absoluter Pfad |
-| Gemini CLI Path | `gemini` | Offizielle Gemini CLI im Stash-PATH oder absoluter Pfad |
+| Antigravity CLI Path | `agy` | Native offizielle Antigravity CLI 1.4+ im Stash-PATH oder absoluter Programmpfad |
 | ChatGPT CLI Model | leer | CLI-Standard oder bildfähiges Modell des ChatGPT-Kontos |
-| Gemini CLI Model | leer | CLI-Standard oder verfügbarer Modellname/Alias |
-| CLI Account Directory | leer | Normale CLI-Verzeichnisse; optional eigener persistenter absoluter Ordner |
+| Antigravity CLI Model | leer | CLI-Standard oder exakter bildfähiger Modell-Slug aus `agy models` |
+| CLI Account Directory | leer | Codex: normales Profil; Antigravity: eigenes Profil unter ~/.funscript-ollama/antigravity. Optional gemeinsamer persistenter Ordner, siehe CLI-SETUP.md |
 | Analysis Frames Per Second | 30 | Zielrate der optischen Messung; 2–30 |
 | AI Region Refresh Seconds | 15 | Aktiven Bildbereich neu prüfen; 2–120 Sekunden |
 | Inactive AI Region Recheck Seconds | 5 | Inaktiven Bereich früher neu prüfen; 2–120, höchstens aktives Intervall |

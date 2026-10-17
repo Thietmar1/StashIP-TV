@@ -8,6 +8,9 @@ provider, args = sys.argv[1], sys.argv[2:]
 if "--version" in args:
     print("offline-cli-fixture 1.0")
     sys.exit(0)
+if "--help" in args:
+    print("--json-schema --print-timeout --disable-slash-commands")
+    sys.exit(0)
 if args == ["login", "status"]:
     print("Logged in using " + os.environ.get("FAKE_AUTH", "ChatGPT"), file=sys.stderr)
     sys.exit(0)
@@ -17,7 +20,7 @@ images = sorted(Path.cwd().glob("frame-*.jpg"))
 assert len(images) == 2 and all(p.read_bytes().startswith(b"\xff\xd8") for p in images)
 assert "--yolo" not in args and "shell" not in args
 record = {"provider": provider, "images": len(images), "cwd": str(Path.cwd()), "args": args,
-          "codex_home": os.environ.get("CODEX_HOME"), "gemini_home": os.environ.get("GEMINI_CLI_HOME")}
+          "codex_home": os.environ.get("CODEX_HOME"), "account_home": os.environ.get("HOME")}
 if provider == "chatgpt_cli":
     prompt = sys.stdin.read()
     assert "required" in prompt and 'forced_login_method="chatgpt"' in args
@@ -28,11 +31,15 @@ if provider == "chatgpt_cli":
 else:
     prompt = args[args.index("--prompt")+1]
     assert all("@"+p.name in prompt for p in images)
-    config = json.loads(Path(os.environ["GEMINI_CLI_SYSTEM_SETTINGS_PATH"]).read_text())
-    assert config["security"]["auth"]["enforcedType"] == "oauth-personal"
-    assert config["admin"]["mcp"]["enabled"] is False
-    assert config["hooksConfig"]["enabled"] is False
-    assert config["tools"]["core"] == ["read_file", "read_many_files"]
+    config = json.loads((Path(os.environ["HOME"]) / ".gemini/antigravity-cli/settings.json").read_text())
+    assert os.environ["HOME"] == os.environ["USERPROFILE"]
+    assert not config.get("modelProvider") and config["toolPermission"] == "strict"
+    assert set(config["permissions"]["deny"]) >= {"command(*)", "mcp(*)", "write_file(*)", "read_url(*)"}
+    assert "--approval-mode" not in args and "--disable-slash-commands" in args
+    assert "--dangerously-skip-permissions" not in args
+    schema = json.loads(Path(args[args.index("--json-schema")+1]).read_text())
+    assert schema["required"] == ["active", "confidence", "roi", "axis"]
+    record["timeout"] = args[args.index("--print-timeout")+1]
 record["prompt"] = prompt
 trace = Path(os.environ["FAKE_TRACE"])
 prior = trace.read_text().splitlines() if trace.exists() else []
@@ -48,10 +55,22 @@ if mode == "error-envelope":
 region = {"active": True, "confidence": 0.9, "roi": [0.1, 0.1, 0.9, 0.9], "axis": "y"}
 text = json.dumps(region)
 if mode == "invalid" or (mode == "invalid-once" and not prior):
-    text = "private-output-secret: not region JSON"
+    region["roi"] = [0.8, 0.8, 0.1, 0.1]
+    text = json.dumps(region)
 if mode == "fenced":
     text = "```json\n"+text+"\n```"
 if provider == "chatgpt_cli":
     Path(args[args.index("--output-last-message")+1]).write_text(text, encoding="utf-8")
 else:
-    print(json.dumps({"response": text, "stats": {"models": {}}}))
+    envelope = {"status": "SUCCESS", "structured_output": region, "response": text}
+    if mode.startswith("status-"):
+        envelope["status"] = mode[7:].upper()
+    if mode == "missing-status":
+        del envelope["status"]
+    if mode in ("missing-structured", "empty-success"):
+        del envelope["structured_output"]
+    if mode == "empty-success":
+        envelope["response"] = ""
+    if mode == "partial-timeout":
+        print("[agy] print timeout; returning partial output", file=sys.stderr)
+    print(json.dumps(envelope))

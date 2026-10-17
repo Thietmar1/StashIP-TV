@@ -25,12 +25,14 @@ def cli_command(executable, provider):
         raise RuntimeError(f"{provider} executable not found; install the official CLI in the Stash runtime and check CLI Path")
     path = Path(resolved)
     if path.suffix.lower() in (".cmd", ".bat", ".ps1"):
-        name = "@openai/codex" if provider == "ChatGPT CLI" else "@google/gemini-cli"
+        if provider != "ChatGPT CLI":
+            raise ProviderUnavailableError("Antigravity CLI needs the native agy executable; shell wrappers and IDE launchers are not supported")
+        name = "@openai/codex"
         package = ((path.parent.parent / name) if path.parent.name == ".bin" else path.parent / "node_modules" / name)
         try:
             manifest = json.loads((package / "package.json").read_text(encoding="utf-8"))
             bins = manifest["bin"]
-            relative = bins["codex" if provider == "ChatGPT CLI" else "gemini"] if isinstance(bins, dict) else bins
+            relative = bins["codex"] if isinstance(bins, dict) else bins
             script = (package / relative).resolve()
             if not script.is_relative_to(package.resolve()):
                 raise ValueError("Package entry point escapes its package")
@@ -43,20 +45,74 @@ def cli_command(executable, provider):
     return [str(path)]
 
 
+def antigravity_home(settings):
+    root = (Path(settings["cli_account_dir"]).expanduser() if settings["cli_account_dir"]
+            else Path.home() / ".funscript-ollama")
+    return root / "antigravity"
+
+
+ANTIGRAVITY_DENY = ["command(*)", "unsandboxed(*)", "write_file(*)",
+                    "read_url(*)", "execute_url(*)", "mcp(*)"]
+
+
+def prepare_antigravity_profile(settings):
+    """Manage a reserved profile, never read/copy the CLI's authentication data."""
+    home = antigravity_home(settings)
+    config = home / ".gemini" / "antigravity-cli" / "settings.json"
+    config.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if not config.exists():
+        try:
+            with config.open("x", encoding="utf-8") as target:
+                json.dump({"toolPermission": "strict", "allowNonWorkspaceAccess": False,
+                           "permissions": {"deny": ANTIGRAVITY_DENY, "allow": [], "ask": []}}, target)
+        except FileExistsError:
+            pass
+    try:
+        value = json.loads(config.read_text(encoding="utf-8-sig"))
+        deny = value.get("permissions", {}).get("deny", [])
+        if (value.get("modelProvider") or value.get("toolPermission") != "strict"
+                or value.get("allowNonWorkspaceAccess") is not False
+                or not isinstance(deny, list) or not set(ANTIGRAVITY_DENY).issubset(deny)):
+            raise ValueError("Unsafe profile")
+        # Extensions can start processes before a tool permission check. This is
+        # a dedicated image-only profile, not the user's general IDE profile.
+        for base in (home / ".gemini" / "config", config.parent, home / ".agents"):
+            for name in ("mcp_config.json", "hooks.json", "skills.json", "plugins.json", "config.json"):
+                file = base / name
+                if file.exists():
+                    data = json.loads(file.read_text(encoding="utf-8-sig"))
+                    if data not in ({}, {"mcpServers": {}}, {"hooks": {}}, {"entries": [], "inherits": []}):
+                        raise ValueError("Custom profile configuration")
+            for name in ("plugins", "skills", "hooks", "rules", "agents"):
+                folder = base / name
+                if folder.exists() and any(folder.iterdir()):
+                    raise ValueError("Custom profile extensions")
+    except (OSError, ValueError, TypeError, AttributeError):
+        raise ProviderUnavailableError("Antigravity needs its dedicated account-only image profile; "
+                                       "remove API mode, custom MCP/plugins/hooks and restore the permissions "
+                                       "in CLI-SETUP.md; no credentials were read or changed") from None
+    return home
+
+
 def account_environment(settings):
     env = os.environ.copy()
-    # Explicitly selected account mode must not silently fall back to paid keys,
-    # Vertex, alternate endpoints or an inherited .env file.
     for key in ("OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL", "GEMINI_API_KEY", "GOOGLE_API_KEY",
                 "GOOGLE_GENAI_USE_VERTEXAI", "GOOGLE_APPLICATION_CREDENTIALS", "CLOUDSDK_AUTH_ACCESS_TOKEN",
-                "GOOGLE_CLOUD_ACCESS_TOKEN"):
+                "GOOGLE_CLOUD_ACCESS_TOKEN", "GOOGLE_GEMINI_BASE_URL", "GEMINI_BASE_URL", "AGY_ADC_AUTH",
+                "GOOGLE_CLOUD_QUOTA_PROJECT", "GEMINI_CLI_HOME", "GEMINI_CLI_SYSTEM_SETTINGS_PATH"):
         env.pop(key, None)
-    if settings["cli_account_dir"]:
-        root = Path(settings["cli_account_dir"]).expanduser()
-        for child in (root / "codex", root / "gemini"):
-            child.mkdir(parents=True, exist_ok=True, mode=0o700)
-        env["CODEX_HOME"] = str(root / "codex")
-        env["GEMINI_CLI_HOME"] = str(root / "gemini")
+    # Do not inherit private gateways, IDE sessions or alternate config roots.
+    for key in tuple(env):
+        if key.startswith(("AGY_LLM_GATEWAY_", "ANTIGRAVITY_")):
+            env.pop(key, None)
+    if settings["ai_provider"] == "chatgpt_cli":
+        if settings["cli_account_dir"]:
+            home = Path(settings["cli_account_dir"]).expanduser() / "codex"
+            home.mkdir(parents=True, exist_ok=True, mode=0o700)
+            env["CODEX_HOME"] = str(home)
+    else:
+        home = prepare_antigravity_profile(settings)
+        env["HOME"] = env["USERPROFILE"] = str(home)
     env["NO_COLOR"] = "1"
     return env
 
@@ -206,8 +262,8 @@ class CLIVision:
         self.settings, self.log, self.validator = settings, log, validator
         self.prompt, self.schema = prompt, schema
         self.codex = settings["ai_provider"] == "chatgpt_cli"
-        self.label = "ChatGPT CLI" if self.codex else "Gemini CLI"
-        self.command = cli_command(settings["codex_path" if self.codex else "gemini_path"], self.label)
+        self.label = "ChatGPT CLI" if self.codex else "Antigravity CLI"
+        self.command = cli_command(settings["codex_path" if self.codex else "antigravity_path"], self.label)
         self.env = account_environment(settings)
 
     def invoke(self, args, directory, prompt="", extra_outputs=(), timeout=None):
@@ -218,6 +274,11 @@ class CLIVision:
     def check_model(self):
         with tempfile.TemporaryDirectory(prefix="funscript-cli-check-") as directory:
             self.invoke(["--version"], directory, timeout=30)
+            if not self.codex:
+                help_out, help_err = self.invoke(["--help"], directory, timeout=30)
+                help_text = help_out + help_err
+                if not all(flag in help_text for flag in ("--json-schema", "--print-timeout", "--disable-slash-commands")):
+                    raise ProviderUnavailableError("Install the official Antigravity CLI 1.4+ (agy), not the desktop IDE launcher")
             if self.codex:
                 out, err = self.invoke(["login", "status"], directory, timeout=30)
                 if "logged in using chatgpt" not in (out + err).lower():
@@ -263,30 +324,33 @@ class CLIVision:
                         raise ProviderUnavailableError("ChatGPT CLI produced no final response file")
                     text = output.read_text(encoding="utf-8")
                 else:
-                    config = root / ".gemini" / "settings.json"
-                    config.parent.mkdir(exist_ok=True)
-                    config.write_text(json.dumps({
-                        "security": {"auth": {"selectedType": "oauth-personal", "enforcedType": "oauth-personal"}},
-                        "admin": {"extensions": {"enabled": False}, "mcp": {"enabled": False}, "skills": {"enabled": False}},
-                        "hooksConfig": {"enabled": False}, "skills": {"enabled": False},
-                        "tools": {"core": ["read_file", "read_many_files"]},
-                        "advanced": {"ignoreLocalEnv": True}, "telemetry": {"enabled": False},
-                    }), encoding="utf-8")
-                    # Force these settings for this process only. Account files
-                    # remain under the CLI's own home and are never read here.
-                    self.env["GEMINI_CLI_SYSTEM_SETTINGS_PATH"] = str(config)
-                    args = ["--approval-mode", "default", "--output-format", "json", "--prompt",
-                            prompt + "\nImages in chronological order: " + " ".join("@" + name for name in images)]
-                    if self.settings["gemini_model"]:
-                        args += ["--model", self.settings["gemini_model"]]
-                    stdout, _ = self.invoke(args, directory)
+                    schema = root / "region-schema.json"
+                    schema.write_text(json.dumps(self.schema), encoding="utf-8")
+                    args = ["--output-format", "json", "--json-schema", str(schema),
+                            "--print-timeout", f"{self.settings['timeout_seconds']}s",
+                            "--disable-slash-commands", "--log-file", str(root / "agy.log"),
+                            "--prompt", prompt + "\nInspect these JPEG files with the image viewing tool, in chronological order: "
+                            + " ".join("@" + name for name in images)
+                            + ". Do not infer a region without viewing both images. Do not run commands, "
+                              "browse, create files, or use other agents. Return the region JSON only."]
+                    if self.settings["antigravity_model"]:
+                        args += ["--model", self.settings["antigravity_model"]]
+                    stdout, stderr = self.invoke(args, directory, extra_outputs=(root / "agy.log",))
                     try:
                         envelope = json.loads(stdout)
                     except json.JSONDecodeError:
-                        raise ProviderUnavailableError("Gemini CLI produced no valid output envelope") from None
-                    if not isinstance(envelope, dict) or envelope.get("error"):
-                        raise ProviderUnavailableError("Gemini CLI reported an error; check account login, quota or content restrictions")
-                    text = envelope.get("response")
+                        raise ProviderUnavailableError("Antigravity CLI produced no valid output envelope") from None
+                    if (not isinstance(envelope, dict) or envelope.get("error")
+                            or envelope.get("status") != "SUCCESS"
+                            or "print timeout" in stderr.lower()):
+                        raise ProviderUnavailableError("Antigravity CLI did not complete successfully; check account login, "
+                                                       "quota, permissions or content restrictions; raw output withheld")
+                    structured = envelope.get("structured_output")
+                    if not isinstance(structured, dict):
+                        raise ProviderUnavailableError("Antigravity CLI returned no structured image result; "
+                                                       "no output created")
+                    text = json.dumps(structured)
+
                 try:
                     result = self.validator(parse_region_text(text))
                 except ValueError:
