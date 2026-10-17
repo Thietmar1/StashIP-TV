@@ -2,7 +2,7 @@
   name: Funscript Ollama
   metadata:
     description: Ollama or account-based ChatGPT/Gemini CLI vision with Haven motion, VR, extra axes and chapters.
-  version: "0.3.1-eecfd76ab6b8"
-  date: "2026-10-17 05:55:32"
+  version: "0.4.0-808e019d4127"
+  date: "2026-10-17 12:05:39"
   path: FunscriptOllama.zip
-  sha256: c0f501dd1292028f42364a3f5a224cf868d0e314016b16d1dd83a1367439d0de
+  sha256: 1842675832e474862ede594bce4982ecd08f477b4a7119f4f7fdac8e93e07b6b
