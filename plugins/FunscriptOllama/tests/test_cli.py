@@ -172,6 +172,27 @@ class CLITests(unittest.TestCase):
         self.assertEqual(call["timeout"], "120s")
         self.assertEqual(call["args"][call["args"].index("--model")+1], "exact-model-slug")
 
+    def test_sparse_cli_settings_and_empty_mcp_placeholder_remain_usable(self):
+        settings = plugin.configuration({"ai_provider": "antigravity_cli", "cli_account_dir": str(self.root)})
+        home = cli.prepare_antigravity_profile(settings)
+        config = home / ".gemini/antigravity-cli/settings.json"
+        value = json.loads(config.read_text())
+        del value["allowNonWorkspaceAccess"]  # agy omits its false default when saving.
+        config.write_text(json.dumps(value), encoding="utf-8")
+        mcp = home / ".gemini/config/mcp_config.json"
+        mcp.parent.mkdir(parents=True, exist_ok=True)
+        for placeholder in ("", " \n\t", "\ufeff\n"):
+            with self.subTest(placeholder=repr(placeholder)):
+                mcp.write_text(placeholder, encoding="utf-8")
+                before = (config.read_bytes(), mcp.read_bytes())
+                env = cli.account_environment(settings)
+                self.assertEqual(env["USERPROFILE"], str(home))
+                self.assertEqual((config.read_bytes(), mcp.read_bytes()), before)
+        for content in ("{", "null", '{"mcpServers":{"enabled":{"command":"bad"}}}'):
+            mcp.write_text(content, encoding="utf-8")
+            with self.assertRaises(cli.ProviderUnavailableError):
+                cli.account_environment(settings)
+
     def test_reserved_profile_rejects_api_mode_hooks_mcp_and_unsafe_permissions(self):
         settings = plugin.configuration({"ai_provider": "antigravity_cli", "cli_account_dir": str(self.root)})
         home = cli.prepare_antigravity_profile(settings)

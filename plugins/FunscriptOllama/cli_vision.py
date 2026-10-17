@@ -71,7 +71,7 @@ def prepare_antigravity_profile(settings):
         value = json.loads(config.read_text(encoding="utf-8-sig"))
         deny = value.get("permissions", {}).get("deny", [])
         if (value.get("modelProvider") or value.get("toolPermission") != "strict"
-                or value.get("allowNonWorkspaceAccess") is not False
+                or value.get("allowNonWorkspaceAccess", False) is not False
                 or not isinstance(deny, list) or not set(ANTIGRAVITY_DENY).issubset(deny)):
             raise ValueError("Unsafe profile")
         # Extensions can start processes before a tool permission check. This is
@@ -80,7 +80,11 @@ def prepare_antigravity_profile(settings):
             for name in ("mcp_config.json", "hooks.json", "skills.json", "plugins.json", "config.json"):
                 file = base / name
                 if file.exists():
-                    data = json.loads(file.read_text(encoding="utf-8-sig"))
+                    # agy can create a blank MCP placeholder before saving settings.
+                    # Only missing/default-false or blank files are accepted;
+                    # malformed non-empty configuration still fails closed.
+                    content = file.read_text(encoding="utf-8-sig").strip()
+                    data = json.loads(content) if content else {}
                     if data not in ({}, {"mcpServers": {}}, {"hooks": {}}, {"entries": [], "inherits": []}):
                         raise ValueError("Custom profile configuration")
             for name in ("plugins", "skills", "hooks", "rules", "agents"):

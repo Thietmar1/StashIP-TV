@@ -1,4 +1,4 @@
-# Funscript Ollama (Prototyp 0.5.0)
+# Funscript Ollama (Prototyp 0.5.1)
 
 Eigenständiges Stash-Plugin, inspiriert vom Tag-Ablauf von
 [FunscriptHaven](https://github.com/stashapp/CommunityScripts/tree/main/plugins/FunscriptHaven).
