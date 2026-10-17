@@ -25,10 +25,10 @@ from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 PLUGIN_ID = "FunscriptOllama"
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 DEFAULTS = {
-    "ai_provider": "ollama", "codex_path": "codex", "gemini_path": "gemini",
-    "codex_model": "", "gemini_model": "", "cli_account_dir": "",
+    "ai_provider": "ollama", "codex_path": "codex", "antigravity_path": "agy",
+    "codex_model": "", "antigravity_model": "", "cli_account_dir": "",
     "ollama_url": "http://192.168.178.16:11434",
     "model": "qwen3-vl:8b-instruct",
     "trigger_tag": "FunscriptOllama_Process",
@@ -66,7 +66,7 @@ RECOMMENDED_GENERATION_SETTINGS = {key: DEFAULTS[key] for key in (
     "multi_axis_intensity", "random_speed", "smart_limit", "auto_home_delay", "auto_home_duration",
 )}
 ANALYSIS_SETTING_KEYS = (
-    "engine", "ai_provider", "model", "codex_model", "gemini_model", "analysis_fps",
+    "engine", "ai_provider", "model", "codex_model", "antigravity_model", "analysis_fps",
     "roi_interval", "inactive_roi_interval", "ai_frame_spacing_seconds", "max_speed",
     "detrend_window", "norm_window", "keyframe_reduction", "motion_smoothing_seconds",
     "minimum_motion_range", "pov_mode", "balance_global", "vr_auto", "vr_tags", "vr_layout",
@@ -99,6 +99,10 @@ REGION_PROMPT = (
 
 
 def configuration(raw):
+    raw = dict(raw)
+    # Keep existing installations selectable without launching the retired CLI.
+    if raw.get("ai_provider") in ("gemini_cli", "antigravity"):
+        raw["ai_provider"] = "antigravity_cli"
     settings = dict(DEFAULTS)
     for key in DEFAULTS:
         if key in raw and raw[key] is not None and raw[key] != "":
@@ -116,18 +120,18 @@ def configuration(raw):
     for key in BOOLEANS:
         if type(settings[key]) is not bool:
             raise ValueError(f"{key} must be a boolean")
-    for key, allowed in (("ai_provider", ("ollama", "chatgpt_cli", "gemini_cli")),
+    for key, allowed in (("ai_provider", ("ollama", "chatgpt_cli", "antigravity_cli")),
                          ("engine", ("ollama", "haven", "ollama_haven")),
                          ("vr_layout", ("haven", "sbs", "tb", "mono"))):
         if settings[key] not in allowed:
             raise ValueError(f"{key} must be one of {', '.join(allowed)}")
     if not isinstance(settings["vr_tags"], str):
         raise ValueError("vr_tags must be comma-separated names")
-    for key in ("codex_path", "gemini_path", "codex_model", "gemini_model", "cli_account_dir"):
+    for key in ("codex_path", "antigravity_path", "codex_model", "antigravity_model", "cli_account_dir"):
         if not isinstance(settings[key], str) or any(c in settings[key] for c in ("\x00", "\r", "\n")):
             raise ValueError(f"{key} must be a single-line string")
         settings[key] = settings[key].strip()
-    if not settings["codex_path"] or not settings["gemini_path"]:
+    if not settings["codex_path"] or not settings["antigravity_path"]:
         raise ValueError("CLI executable paths must not be empty")
     if settings["cli_account_dir"] and not Path(settings["cli_account_dir"]).expanduser().is_absolute():
         raise ValueError("CLI Account Directory must be an absolute path")
@@ -166,7 +170,7 @@ def vision_client(settings, log):
 
 def selected_model(settings):
     return (settings["model"] if settings["ai_provider"] == "ollama" else
-            settings["codex_model" if settings["ai_provider"] == "chatgpt_cli" else "gemini_model"] or "CLI account default")
+            settings["codex_model" if settings["ai_provider"] == "chatgpt_cli" else "antigravity_model"] or "CLI account default")
 
 
 def validate_region(value):

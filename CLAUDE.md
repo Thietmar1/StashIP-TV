@@ -5,7 +5,7 @@ This repository contains `plugins/StashIP-TV` and the independent experimental
 removed. Preserve the original AGPL license and notices.
 
 Funscript Ollama uses Python/OpenCV plus native Ollama vision/structured JSON or
-the official Codex/Gemini CLI with account login. Preserve the account-only mode:
+the official Codex/Antigravity CLI with account login. Preserve the account-only mode:
 do not extract OAuth tokens, call private backends, silently use API keys, or
 install CLIs at task runtime. CLI subprocesses must have bounded output/time,
 stop descendants on exit/cancellation, and never log raw credential-bearing output.
