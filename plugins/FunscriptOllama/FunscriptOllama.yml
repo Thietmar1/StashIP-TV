@@ -1,6 +1,6 @@
 name: Funscript Ollama
 description: Experimental Ollama, ChatGPT CLI or Gemini CLI vision with Haven motion analysis, VR/POV, extra axes and chapter markers.
-version: "0.3.1"
+version: "0.4.0"
 url: https://github.com/Thietmar1/StashIP-TV/tree/main/plugins/FunscriptOllama
 exec:
   - python
@@ -12,7 +12,7 @@ tasks:
     defaultArgs:
       mode: test_provider
   - name: Apply Recommended Generation Settings
-    description: Apply the documented generation preset and 3-hour AI timeout. Preserve AI provider, account paths, models, server URL, tag names and marker preferences. Reload settings afterwards.
+    description: Apply the detail preset (30 fps, dense points, less smoothing, 15/5-second active/inactive AI refresh) and 3-hour request timeout. Preserve AI provider, account paths, models, server URL, tag names and marker preferences. Reload settings afterwards.
     defaultArgs:
       mode: apply_recommended
   - name: Test Ollama Connection
@@ -82,11 +82,19 @@ settings:
     type: STRING
   analysis_fps:
     displayName: Analysis Frames Per Second
-    description: "Default: 15; range 2–30. OpenCV measures movement at this rate, not Ollama."
+    description: "Default: 30; range 2–30. Local optical-flow sampling target, limited by source frame rate; no invented intermediate samples. Higher rates require more processing."
     type: NUMBER
   roi_interval:
     displayName: AI Region Refresh Seconds
-    description: "Default: 30; range 2–120. Each refresh sends two sampled frames to the selected AI provider."
+    description: "Default: 15; range 2–120. Active-region refresh. Each refresh sends two sampled frames to the selected AI provider; shorter intervals consume more time/quota."
+    type: NUMBER
+  inactive_roi_interval:
+    displayName: Inactive AI Region Recheck Seconds
+    description: "Default: 5; range 2–120. Recheck an inactive region after this interval, capped by the active refresh interval. Never force an inactive response to active."
+    type: NUMBER
+  ai_frame_spacing_seconds:
+    displayName: AI Frame Pair Spacing Seconds
+    description: "Default: 0.25; range 0.05–2. Time separation of the two vision frames, independent of local sampling. Early frames or cuts can shorten it. At most 128 reduced frames are buffered."
     type: NUMBER
   timeout_seconds:
     displayName: AI Request Timeout Seconds
@@ -94,7 +102,7 @@ settings:
     type: NUMBER
   max_speed:
     displayName: Maximum Position Change Per Second
-    description: "Default: 150; range 10–500 position units/second. Output values range from 0 to 100."
+    description: "Default: 300; range 10–500 position units/second. Bounds the output signal (0–100), independently of device/player limits. Lower values flatten fast changes."
     type: NUMBER
   overwrite:
     displayName: Overwrite Existing Funscript
@@ -122,8 +130,16 @@ settings:
     type: NUMBER
   keyframe_reduction:
     displayName: Reduce Keyframes
-    description: "Default: on. Keep direction changes instead of every measured point."
+    description: "Default: off. Preserve each measured point after processing. Enable to reduce the trace to direction changes, which changes interpolation between points."
     type: BOOLEAN
+  motion_smoothing_seconds:
+    displayName: Motion Smoothing Seconds
+    description: "Default: 0.05; range 0–1. Temporal averaging after normalization. Lower values retain shorter measured changes; 0 disables this averaging. Can also retain more noise."
+    type: NUMBER
+  minimum_motion_range:
+    displayName: Minimum Measured Motion Range
+    description: "Default: 0.25; range 0.01–5. Minimum 5th–95th percentile range of integrated, detrended flow per segment. Lower values accept smaller signals; they can also admit noise. Does not override inactive/low-confidence AI regions."
+    type: NUMBER
   pov_mode:
     displayName: POV Mode
     description: "Default: off. Use Haven radial flow with a bottom-center motion origin inside the selected region."

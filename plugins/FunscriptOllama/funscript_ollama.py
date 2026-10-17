@@ -7,6 +7,7 @@ other than explicit image requests to the selected AI provider.
 from __future__ import annotations
 
 import base64
+from collections import deque
 import gc
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
@@ -24,7 +25,7 @@ from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 PLUGIN_ID = "FunscriptOllama"
-VERSION = "0.3.1"
+VERSION = "0.4.0"
 DEFAULTS = {
     "ai_provider": "ollama", "codex_path": "codex", "gemini_path": "gemini",
     "codex_model": "", "gemini_model": "", "cli_account_dir": "",
@@ -33,10 +34,12 @@ DEFAULTS = {
     "trigger_tag": "FunscriptOllama_Process",
     "complete_tag": "FunscriptOllama_Complete",
     "error_tag": "FunscriptOllama_Error",
-    "analysis_fps": 15, "roi_interval": 30, "timeout_seconds": 10800,
-    "max_speed": 150, "overwrite": False,
+    "analysis_fps": 30, "roi_interval": 15, "inactive_roi_interval": 5,
+    "ai_frame_spacing_seconds": 0.25, "timeout_seconds": 10800,
+    "max_speed": 300, "overwrite": False,
     "engine": "ollama_haven", "threads": 2, "decoder_threads": 1, "batch_size": 32,
-    "detrend_window": 2, "norm_window": 4, "keyframe_reduction": True,
+    "detrend_window": 2, "norm_window": 4, "keyframe_reduction": False,
+    "motion_smoothing_seconds": 0.05, "minimum_motion_range": 0.25,
     "pov_mode": False, "balance_global": True,
     "vr_auto": True, "vr_tags": "VR,Virtual Reality,180°,360°", "vr_layout": "sbs",
     "multi_axis": False, "multi_axis_intensity": 5, "random_speed": 3,
@@ -45,6 +48,8 @@ DEFAULTS = {
     "add_marker": False,
 }
 LIMITS = {"analysis_fps": (2, 30), "roi_interval": (2, 120),
+          "inactive_roi_interval": (2, 120), "ai_frame_spacing_seconds": (0.05, 2),
+          "motion_smoothing_seconds": (0, 1), "minimum_motion_range": (0.01, 5),
           "timeout_seconds": (10, 10800), "max_speed": (10, 500),
           "threads": (1, 32), "decoder_threads": (1, 16), "batch_size": (1, 3000),
           "detrend_window": (1, 10), "norm_window": (1, 10),
@@ -54,11 +59,19 @@ LIMITS = {"analysis_fps": (2, 30), "roi_interval": (2, 120),
 BOOLEANS = ("overwrite", "keyframe_reduction", "pov_mode", "balance_global", "vr_auto",
             "multi_axis", "smart_limit", "import_chapters", "export_chapters", "add_marker")
 RECOMMENDED_GENERATION_SETTINGS = {key: DEFAULTS[key] for key in (
-    "engine", "analysis_fps", "roi_interval", "timeout_seconds", "max_speed",
+    "engine", "analysis_fps", "roi_interval", "inactive_roi_interval", "ai_frame_spacing_seconds",
+    "timeout_seconds", "max_speed", "motion_smoothing_seconds", "minimum_motion_range",
     "threads", "decoder_threads", "batch_size", "detrend_window", "norm_window", "keyframe_reduction",
     "balance_global", "pov_mode", "vr_auto", "vr_layout", "multi_axis", "overwrite",
     "multi_axis_intensity", "random_speed", "smart_limit", "auto_home_delay", "auto_home_duration",
 )}
+ANALYSIS_SETTING_KEYS = (
+    "engine", "ai_provider", "model", "codex_model", "gemini_model", "analysis_fps",
+    "roi_interval", "inactive_roi_interval", "ai_frame_spacing_seconds", "max_speed",
+    "detrend_window", "norm_window", "keyframe_reduction", "motion_smoothing_seconds",
+    "minimum_motion_range", "pov_mode", "balance_global", "vr_auto", "vr_tags", "vr_layout",
+    "smart_limit", "auto_home_delay", "auto_home_duration",
+)
 REGION_SCHEMA = {
     "type": "object", "additionalProperties": False,
     "required": ["active", "confidence", "roi", "axis"],
@@ -347,14 +360,14 @@ def segment_actions(samples, max_speed, settings=None):
         return np.convolve(np.pad(values, (left, right), mode="edge"), np.ones(width)/width, mode="valid")
     position -= rolling(position, settings["detrend_window"])
     spread = float(np.percentile(position, 95) - np.percentile(position, 5))
-    if spread < 0.5:
+    if spread < settings["minimum_motion_range"]:
         return [{"at": int(times[0]), "pos": 50}, {"at": int(times[-1]), "pos": 50}]
     width = min(len(position), max(1, round(rate * settings["norm_window"])))
     windows = np.lib.stride_tricks.sliding_window_view(
         np.pad(position, (width//2, width-1-width//2), mode="edge"), width)
     low, high = windows.min(axis=1), windows.max(axis=1)
     position = np.clip((position-low) / np.maximum(high-low, 1) * 100, 0, 100)
-    position = rolling(position, 0.15)
+    position = rolling(position, settings["motion_smoothing_seconds"])
     # Limit the dense trace before reducing, rather than limiting only extrema.
     for i in range(1, len(position)):
         step = max_speed * (times[i] - times[i-1]) / 1000
@@ -446,6 +459,9 @@ def analyze_video(path, settings, ollama, progress=lambda value: None, vr=False,
         index, previous, previous_color = 0, None, None
         last_at, last_refresh = -1, -math.inf
         region, samples, segments, regions = None, [], [], []
+        # At most 128 reduced frames; use a time-separated vision pair even
+        # when local optical-flow sampling runs at the source's full rate.
+        vision_frames = deque(maxlen=128)
         pending = []
         def drain():
             samples.extend((at, future.result()) for at, future in pending)
@@ -455,7 +471,7 @@ def analyze_video(path, settings, ollama, progress=lambda value: None, vr=False,
             points = segment_actions(samples, settings["max_speed"], settings)
             segments.append(points)
             if log and points:
-                log.info(f"Step OK: Motion segment processed through {samples[-1][0]/1000:.1f}s; {len(samples)} samples, {len(points)} keyframes")
+                log.info(f"Step OK: Motion segment processed through {samples[-1][0]/1000:.1f}s; {len(samples)} samples, {len(points)} output points")
         while True:
             ok = cap.grab()
             if not ok:
@@ -474,6 +490,9 @@ def analyze_video(path, settings, ollama, progress=lambda value: None, vr=False,
             if at <= last_at:
                 raise ValueError("Video timestamps are not increasing; remux/transcode the source")
             last_at = at
+            vision_frames.append((at, frame))
+            while len(vision_frames) > 2 and vision_frames[1][0] <= at-settings["ai_frame_spacing_seconds"]*1000:
+                vision_frames.popleft()
             if previous is None:
                 previous, previous_color = gray, frame
                 samples = [(at, 0.0)]
@@ -484,14 +503,19 @@ def analyze_video(path, settings, ollama, progress=lambda value: None, vr=False,
             if cut:
                 finish_segment()
                 region, samples = None, [(at, 0.0)]
+                vision_frames.clear()
+                vision_frames.append((at, frame))
                 previous, previous_color = gray, frame
                 continue
-            if region is None or at-last_refresh >= settings["roi_interval"]*1000:
+            refresh_seconds = settings["roi_interval"]
+            if region is not None and not region["active"]:
+                refresh_seconds = min(refresh_seconds, settings["inactive_roi_interval"])
+            if region is None or at-last_refresh >= refresh_seconds*1000:
                 # No displacement is measured across a cut or a changed tracking region.
                 finish_segment()
-                region = (ollama.region([previous_color, frame]) if settings["engine"] != "haven" else
+                region = (ollama.region([vision_frames[0][1], frame]) if settings["engine"] != "haven" else
                           {"active": True, "confidence": 1.0, "roi": [0, 0, 1, 1], "axis": "y"})
-                regions.append({"at": at, **region})
+                regions.append({"at": at, "frame_gap_ms": at-vision_frames[0][0], **region})
                 if log:
                     log.info(f"Step OK: Tracking region selected at {at/1000:.1f}s; active={region['active']}")
                 last_refresh = at
@@ -519,7 +543,8 @@ def analyze_video(path, settings, ollama, progress=lambda value: None, vr=False,
                 "metadata": {"creator": f"Funscript Ollama {VERSION}", "model": selected_model(settings),
                              "ai_provider": settings["ai_provider"] if settings["engine"] != "haven" else "none",
                              "experimental": True, "engine": settings["engine"],
-                             "vr": vr, "regions": regions}}
+                             "vr": vr, "regions": regions,
+                             "generation_settings": {k: settings[k] for k in ANALYSIS_SETTING_KEYS if k != "vr_tags"}}}
     finally:
         executor.shutdown(wait=True, cancel_futures=True)
         cap.release()
@@ -553,11 +578,7 @@ def save_script(path, script, overwrite=False, log=None):
 def recovery_context(path, scene_id, settings, vr):
     """Bind completed analysis to the source and its analysis options, not credentials."""
     stat = path.stat()
-    keys = ("engine", "ai_provider", "model", "codex_model", "gemini_model", "analysis_fps",
-            "roi_interval", "max_speed", "detrend_window", "norm_window", "keyframe_reduction",
-            "pov_mode", "balance_global", "vr_auto", "vr_tags", "vr_layout", "smart_limit",
-            "auto_home_delay", "auto_home_duration")
-    options = json.dumps({k: settings[k] for k in keys}, sort_keys=True, allow_nan=False)
+    options = json.dumps({k: settings[k] for k in ANALYSIS_SETTING_KEYS}, sort_keys=True, allow_nan=False)
     return {"format": 1, "scene_id": str(scene_id), "source": str(path.resolve()),
             "size": stat.st_size, "mtime_ns": stat.st_mtime_ns, "vr": vr,
             "analysis_sha256": hashlib.sha256(options.encode("utf-8")).hexdigest()}
@@ -803,7 +824,7 @@ def run(payload, stash_factory=None, log=None):
         # configure_plugin merges these selected keys with the current plugin
         # settings. Credentials, tag names and marker preferences remain intact.
         stash.configure_plugin(PLUGIN_ID, dict(RECOMMENDED_GENERATION_SETTINGS))
-        log.info("Recommended generation settings applied, including a 10800-second Ollama timeout")
+        log.info("Recommended generation settings applied: 30 fps, dense points, 50 ms smoothing, active/inactive AI refresh 15/5 seconds, maximum change 300 units/s and 10800-second AI timeout")
         return {"output": "Recommended generation settings applied. Reload plugin settings to see the values."}
     raw = stash.get_configuration(fragment="plugins").get("plugins", {}).get(PLUGIN_ID, {})
     settings = configuration(raw)

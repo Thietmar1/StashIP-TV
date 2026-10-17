@@ -1,15 +1,15 @@
 {
   "engine": "ollama_haven",
-  "analysis_fps": 15,
-  "roi_interval": 30,
+  "analysis_fps": 30,
+  "roi_interval": 15,
   "timeout_seconds": 10800,
-  "max_speed": 150,
+  "max_speed": 300,
   "threads": 2,
   "decoder_threads": 1,
   "batch_size": 32,
   "detrend_window": 2,
   "norm_window": 4,
-  "keyframe_reduction": true,
+  "keyframe_reduction": false,
   "balance_global": true,
   "pov_mode": false,
   "vr_auto": true,
@@ -20,5 +20,9 @@
   "random_speed": 3,
   "smart_limit": true,
   "auto_home_delay": 1,
-  "auto_home_duration": 1
+  "auto_home_duration": 1,
+  "inactive_roi_interval": 5,
+  "ai_frame_spacing_seconds": 0.25,
+  "motion_smoothing_seconds": 0.05,
+  "minimum_motion_range": 0.25
 }
