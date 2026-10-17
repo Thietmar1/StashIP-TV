@@ -1,4 +1,4 @@
-# Funscript Ollama (Prototyp 0.3.0)
+# Funscript Ollama (Prototyp 0.3.1)
 
 Eigenständiges Stash-Plugin, inspiriert vom Tag-Ablauf von
 [FunscriptHaven](https://github.com/stashapp/CommunityScripts/tree/main/plugins/FunscriptHaven).
@@ -20,6 +20,35 @@ Konto bzw. echtem Videomaterial geprüft.
 **[Einrichtung für Docker/LXC, Linux und Windows: CLI-SETUP.md](CLI-SETUP.md)**.
 Danach mit **Test Selected AI Provider** ausschließlich künstliche Bilder testen.
 Ollama bleibt Standard und behält Adresse, Modell und bisherigen Ablauf.
+
+## Lange Aufgaben, Stash-Anmeldung und Wiederaufnahme (ab 0.3.1)
+
+Der Stash-Client übernimmt beim Start den bereits vorhandenen **Stash-API-Schlüssel**
+und prüft den Zugriff ohne kurzlebiges Sitzungscookie. Das betrifft nur die lokale
+Stash-Anbindung, nicht Ollama, ChatGPT oder Gemini. Bei passwortgeschütztem Stash
+ohne API-Schlüssel bricht die Aufgabe vor der Analyse ab. In Stash unter
+**Einstellungen → Sicherheit → API-Schlüssel** einen Schlüssel erzeugen und die
+Aufgabe erneut starten. Er wird automatisch übernommen; nicht in die
+KI-Einstellungen, ins Aufgabenprotokoll oder in öffentliche Fehlerberichte kopieren.
+Stash-Installationen ohne Anmeldeschutz benötigen keinen API-Schlüssel.
+
+Nach abgeschlossener Analyse wird das Ergebnis **vor dem Kapitelabruf** atomar
+neben dem Video als `.<Videoname>.funscript.pending.json` gesichert. Scheitert der
+Kapitelabruf oder das Veröffentlichen der Hauptdatei, bleibt diese Datei erhalten.
+Nach Beheben des Fehlers **Process Tagged Scenes** erneut ausführen: Eine passende
+Wiederaufnahmedatei ersetzt die erneute Video-/KI-Analyse. Dies funktioniert auch,
+wenn der KI-Anbieter inzwischen nicht verfügbar ist. Nach erfolgreichem Speichern
+der Hauptdatei wird die Wiederaufnahmedatei entfernt. Spätere Fehler bei Markern
+oder Tags lassen die bereits gespeicherte Hauptdatei bestehen; vorhandene Dateien
+werden weiterhin standardmäßig erhalten, und die Warteschlangenmarkierung bleibt.
+
+Die Wiederaufnahme prüft Szenen-ID, absoluten Quellpfad, Dateigröße, Änderungszeit,
+VR-Modus und Analyseoptionen. Geänderte Quellen/Analyseoptionen, eine beschädigte
+oder fremde Wiederaufnahmedatei werden abgelehnt und zur manuellen Prüfung erhalten.
+Transport-/Loginpfade, Zeitlimits und Tag-Namen werden nicht darin gespeichert.
+Es werden nur vollständig abgeschlossene Analysen gesichert, keine Teilabschnitte.
+Das schützt keine Ergebnisse aus bereits beendeten älteren Plugin-Versionen.
+Bei HTTP 401/403 von Stash wird die restliche Warteschlange gestoppt und erhalten.
 
 ## Verarbeitungsmodi
 
