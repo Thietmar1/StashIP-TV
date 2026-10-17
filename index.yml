@@ -2,7 +2,7 @@
   name: Funscript Ollama
   metadata:
     description: Ollama or account-based ChatGPT/Antigravity CLI vision with Haven motion, VR, extra axes and chapters.
-  version: "0.5.1-f9a7a0a28275"
-  date: "2026-10-17 14:23:49"
+  version: "0.5.2-889b44c3d8a4"
+  date: "2026-10-17 14:47:40"
   path: FunscriptOllama.zip
-  sha256: 4875c597f78fbf72c83cd14cfe8c1584a94586363f6a6fb6a9fe1b4f5b070af1
+  sha256: 77a09afc4ba3efdd7eca52ba12a121baf66a14893518755fa3684500d399c61f
