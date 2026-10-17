@@ -31,10 +31,10 @@ weggelassene Standardeinstellung `allowNonWorkspaceAccess=false` und leere
 MCP-Konfigurationsdateien. Bei diesem Fehler in 0.5.0 das Plugin aktualisieren;
 die bestehende Anmeldung und das Profil müssen nicht gelöscht werden.
 
-Das Profil verwendet `strict` und sperrt Shell-/Schreib-/Web-/MCP-Aktionen. API-Modus, eigene MCP-Server, Hooks, Plugins oder geänderte Sicherheitsregeln führen zum Abbruch. Persönliche IDE-Einstellungen werden nicht überschrieben. Zur Reparatur in `<Profil>/.gemini/antigravity-cli/settings.json` folgende Regeln setzen und eigene Erweiterungen aus diesem reservierten Profil entfernen:
+Ab **0.5.2** verwendet das Profil `request-review` und sperrt Shell-/Schreib-/Web-/MCP-Aktionen weiterhin durch explizite Deny-Regeln. Die CLI 1.4.0 kann im bisherigen `strict`-Modus auch Bildlesezugriffe ablehnen und trotzdem `SUCCESS` ohne Ergebnis melden. Das Plugin migriert ein ansonsten gültiges altes Profil automatisch und atomar; Modellwahl, Anmeldung und Deny-Regeln bleiben erhalten. API-Modus, eigene MCP-Server, Hooks, Plugins oder geänderte Sicherheitsregeln führen zum Abbruch. Persönliche IDE-Einstellungen werden nicht überschrieben. Zur Reparatur in `<Profil>/.gemini/antigravity-cli/settings.json` folgende Regeln setzen und eigene Erweiterungen aus diesem reservierten Profil entfernen:
 
 ```json
-{"toolPermission":"strict","allowNonWorkspaceAccess":false,"permissions":{"deny":["command(*)","unsandboxed(*)","write_file(*)","read_url(*)","execute_url(*)","mcp(*)"],"allow":[],"ask":[]}}
+{"toolPermission":"request-review","allowNonWorkspaceAccess":false,"permissions":{"deny":["command(*)","unsandboxed(*)","write_file(*)","read_url(*)","execute_url(*)","mcp(*)"],"allow":[],"ask":[]}}
 ```
 
 ## Windows, Beispiel für diesen PC
@@ -160,4 +160,4 @@ Temporäre Bilder und Diagnosedateien werden entfernt; rohe CLI-Ausgaben erschei
 - [CLI-Einstellungen](https://antigravity.google/docs/cli/using)
 - [Codex-Anmeldung](https://learn.chatgpt.com/docs/auth)
 
-Automatische Tests prüfen reale Offline-Kindprozesse, JPEG-Dateien, Argumente, Ergebnisvalidierung, Migration, Profilschutz, Kontingentfehler, Ausgabelimit, Zeitlimit und Kindprozessabbruch sowie die vorhandenen Bewegungs-/Kapitelabläufe. Der Aufrufvertrag der nativen Antigravity-CLI 1.4.0 wurde zusätzlich unter Windows geprüft. Der native Bildversuch lieferte hier kein strukturiertes Ergebnis und wurde korrekt abgelehnt. Eine erfolgreiche Konto-Inferenz im Stash-Dienst und die Qualität für deine Videos sind noch nicht bestätigt. CLI-Programme und Anmeldedaten werden nicht im Plugin-ZIP mitgeliefert.
+Automatische Tests prüfen reale Offline-Kindprozesse, JPEG-Dateien, Argumente, Ergebnisvalidierung, Migration, Profilschutz, Kontingentfehler, Ausgabelimit, Zeitlimit und Kindprozessabbruch sowie die vorhandenen Bewegungs-/Kapitelabläufe. Der Aufrufvertrag der nativen Antigravity-CLI 1.4.0 wurde zusätzlich unter Windows geprüft. Mit `request-review` und unveränderten Deny-Regeln lieferte der native Bildtest unter Windows eine gültige strukturierte Antwort für künstliche Rechteckbilder. Damit ist kein Test mit echten Bibliotheksvideos oder im Linux-/Docker-Stash-Dienst verbunden; die Qualität für deine Videos ist separat zu prüfen. CLI-Programme und Anmeldedaten werden nicht im Plugin-ZIP mitgeliefert.

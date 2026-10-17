@@ -1,4 +1,4 @@
-# Funscript Ollama (Prototyp 0.5.1)
+# Funscript Ollama (Prototyp 0.5.2)
 
 Eigenständiges Stash-Plugin, inspiriert vom Tag-Ablauf von
 [FunscriptHaven](https://github.com/stashapp/CommunityScripts/tree/main/plugins/FunscriptHaven).
@@ -24,7 +24,10 @@ Ollama bleibt Standard und behält Adresse, Modell und bisherigen Ablauf.
 Die alte Auswahl `gemini_cli` wird zu `antigravity_cli` migriert. Alte Gemini-
 Programmpfade und Modell-Aliase werden nicht übernommen. Antigravity verwendet
 ein eigenes Profil; Installation, Profil-Anmeldung und Test sind in CLI-SETUP
-beschrieben. Seine native Bildinferenz im Stash-Dienst ist noch nicht bestätigt.
+beschrieben. Ab 0.5.2 wird der bisherige strikte Profilmodus automatisch auf
+`request-review` mit unveränderten Shell-/Schreib-/Web-/MCP-Sperren korrigiert.
+Der native Bildaufruf ist unter Windows mit künstlichen Bildern bestätigt;
+echte Bibliotheksvideos und Linux-/Docker-Inferenz sind separat zu prüfen.
 
 ## Lange Aufgaben, Stash-Anmeldung und Wiederaufnahme (ab 0.3.1)
 
@@ -160,7 +163,7 @@ https://raw.githubusercontent.com/Thietmar1/StashIP-TV/tvguide-iptv/index.yml
 ```
 
 Quellen aktualisieren, **Funscript Ollama** installieren und die Python-Abhängigkeiten
-wie unten beschrieben einrichten. Version 0.5.0 erscheint nach Merge und erfolgreicher
+wie unten beschrieben einrichten. Version 0.5.2 erscheint nach Merge und erfolgreicher
 Veröffentlichung dieses Updates. Die bisherige separate Quelle
 `https://raw.githubusercontent.com/Thietmar1/StashIP-TV/funscript-ollama/index.yml`
 wird aus Kompatibilitätsgründen weiter aktualisiert. Bereits installierte Plugins
