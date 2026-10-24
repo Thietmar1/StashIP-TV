@@ -41,7 +41,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-24.04, windows-latest]
         node: ['20', '22', '24']
     runs-on: ${{ matrix.os }}
     env:
@@ -56,10 +56,24 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Install portable test FFmpeg
+      - name: Install Linux test FFmpeg
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        run: |
+          if ! command -v ffmpeg > /dev/null; then
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y --no-install-recommends ffmpeg
+          fi
+          ffmpeg -version
+      - name: Install Windows test FFmpeg
+        if: runner.os == 'Windows'
         timeout-minutes: 5
         run: python -m pip install imageio-ffmpeg==0.6.0
-      - name: Configure real-media tests
+      - name: Configure Linux real-media tests
+        if: runner.os == 'Linux'
+        run: echo "FFMPEG_TEST_PATH=$(command -v ffmpeg)" >> "$GITHUB_ENV"
+      - name: Configure Windows real-media tests
+        if: runner.os == 'Windows'
         run: python -c "import os,imageio_ffmpeg; f=open(os.environ['GITHUB_ENV'],'a',encoding='utf-8'); f.write('FFMPEG_TEST_PATH='+imageio_ffmpeg.get_ffmpeg_exe()+'\n'); f.close()"
       - name: Install dependencies
         working-directory: plugins/StashIP-TV
@@ -77,7 +91,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-24.04, windows-latest]
         python: ['3.11', '3.13']
     runs-on: ${{ matrix.os }}
     steps:
@@ -99,7 +113,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-24.04, windows-latest]
         python: ['3.11', '3.13']
     runs-on: ${{ matrix.os }}
     steps:
@@ -124,7 +138,7 @@ jobs:
   publish:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: [test, test_funscript, test_intiface]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:

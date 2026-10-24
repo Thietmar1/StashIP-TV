@@ -1,3 +1,4 @@
 # Installed before the offline tests; never included in the Stash package.
 websockets>=13,<16
 aiohttp>=3.10,<4
+PyYAML>=6,<7
