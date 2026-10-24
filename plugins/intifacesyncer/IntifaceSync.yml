@@ -1,0 +1,44 @@
+name: Intiface Sync
+description: "Syncs Funscripts with Buttplug.io / Intiface Central / TheHandy devices. Vibe fork adds support for vibrating (scalar) toys such as Lovense."
+version: 1.51-vibe
+url: https://gitlab.com/allisless0/stash-plugins
+
+exec:
+  - python
+  - "{pluginDir}/IntifaceSync.py"
+
+ui:
+  javascript:
+    - IntifaceSync.js
+
+settings:
+  intifaceUrl:
+    displayName: Intiface server URL
+    description: "Blank (default): ws://localhost:12345, Intiface Central's own default on the computer Stash runs on. Otherwise the WebSocket URL of your Intiface Central server, for example ws://192.168.1.20:12345. Read on every Connect, so press Connect (or reload the page) after changing."
+    type: STRING
+  enableHandy:
+    displayName: Show The Handy controls
+    description: "Off (default): Intiface devices only. On: the settings (the gear under the player) add the Intiface / The Handy switch and, in Handy mode, the connection key row; turn it on only if you use a Handy over WiFi. Reload the page after changing."
+    type: BOOLEAN
+  bridgeOff:
+    displayName: Turn off the bridge for other apps
+    description: "Off (default): the backend also listens on port 12346 as an Intiface server. Point Stashy (or another app that plays funscripts through Intiface) there instead of at Intiface Central, and its strokes play through this plugin on your toy, with no Stash page open: live at first, then with the scene's whole script and its tuning once the backend has recognised the scene. On: no bridge. Restart the backend after changing."
+    type: BOOLEAN
+  bridgeLiveMode:
+    displayName: Bridge live mode
+    description: "How the bridge plays an app's strokes before it has recognised the scene (or for a scene it cannot find): speed (default, faster strokes are stronger), beat (one burst per stroke) or position (the stroke position is the strength)."
+    type: STRING
+  disableHotkeys:
+    displayName: Turn off keyboard shortcuts
+    description: "Off (default): 0 (Stop), E (mute or unmute), backslash (Manual on or off), [ and ] or - and = (weaker, stronger) work on scene pages; in Manual Alt+1..4 load the first four preset cards (Alt+Shift+1..4 move the active preset there) and, while Goon mode runs, Alt+W, Alt+A, Alt+Q, Alt+1..8 and Alt + wheel steer it. The Keyboard shortcuts switch in the settings (the gear under the player) turns them off or on for this browser only. On: the shortcuts are off in every browser and that switch is locked; use it if those keys clash with other plugins or with how you use Stash. Every control stays under the player. Reload the page after changing."
+    type: BOOLEAN
+
+tasks:
+  - name: Start Backend
+    description: Launch the Intiface Sync Python backend in the background
+    defaultArgs:
+      mode: startBackend
+  - name: Stop Backend
+    description: Stop the Intiface Sync Python backend
+    defaultArgs:
+      mode: stopBackend

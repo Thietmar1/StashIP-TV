@@ -1,0 +1,2093 @@
+#!/usr/bin/env python3
+"""Offline test of the vibe engine: fake Buttplug client, synthetic funscript."""
+import sys, os, asyncio, importlib.util, json, time
+
+# Resolve the plugin next to this file so the harness runs from anywhere.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+spec = importlib.util.spec_from_file_location(
+    "isync", os.path.join(_HERE, "IntifaceSync.py"))
+isync = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(isync)
+
+# ── Fake device payloads (Buttplug v3 shapes) ────────────────────────────────
+GUSH = {
+    "DeviceIndex": 0,
+    "DeviceName": "Lovense Gush 2",
+    "DeviceMessages": {
+        "ScalarCmd": [
+            {"StepCount": 20, "FeatureDescriptor": "Vibrator", "ActuatorType": "Vibrate"},
+            {"StepCount": 20, "FeatureDescriptor": "Oscillator", "ActuatorType": "Oscillate"},
+        ],
+        "StopDeviceCmd": {},
+    },
+}
+HANDY = {
+    "DeviceIndex": 1,
+    "DeviceName": "The Handy",
+    "DeviceMessages": {"LinearCmd": [{"StepCount": 100}], "StopDeviceCmd": {}},
+}
+ROTATOR = {
+    "DeviceIndex": 2,
+    "DeviceName": "Rotator Only",
+    "DeviceMessages": {"RotateCmd": [{"StepCount": 20}], "StopDeviceCmd": {}},
+}
+
+
+class FakeBP(isync.ButtplugClient):
+    def __init__(self, devices):
+        super().__init__("ws://fake")
+        self.devices = {d["DeviceIndex"]: d for d in devices}
+        self.sent = []
+
+    async def _send(self, msg_type, payload):
+        self.sent.append((msg_type, payload))
+
+    async def stop_all(self):
+        self.sent.append(("StopAllDevices", {}))
+
+
+def fail(msg):
+    print(f"  FAIL: {msg}")
+    sys.exit(1)
+
+
+# ── 1. device discovery ──────────────────────────────────────────────────────
+print("1. device discovery")
+bp = FakeBP([GUSH, HANDY, ROTATOR])
+sd = bp.scalar_devices()
+ld = bp.linear_devices()
+assert sd == [(0, [(0, "Vibrate"), (1, "Oscillate")])], sd
+assert ld == [1], ld
+assert isync.device_kind(GUSH) == "vibe"
+assert isync.device_kind(HANDY) == "linear"
+assert isync.device_kind(ROTATOR) == "none"
+print(f"   scalar={sd}  linear={ld}  OK")
+
+# ── 2. ScalarCmd wire format ─────────────────────────────────────────────────
+print("2. ScalarCmd wire format")
+asyncio.run(bp.scalar(0, sd[0][1], 0.65))
+msg_type, payload = bp.sent[-1]
+assert msg_type == "ScalarCmd", msg_type
+assert payload["DeviceIndex"] == 0
+assert payload["Scalars"] == [
+    {"Index": 0, "Scalar": 0.65, "ActuatorType": "Vibrate"},
+    {"Index": 1, "Scalar": 0.65, "ActuatorType": "Oscillate"},
+], payload
+print(f"   {json.dumps(payload['Scalars'])}  OK")
+
+# ── 3. script state interpolation ────────────────────────────────────────────
+print("3. script interpolation")
+bp2 = FakeBP([GUSH])
+p = isync.FunscriptPlayer(bp2)
+# 0->100 over 200ms (fast), then a 5s gap, then slow 100->0 over 1000ms
+p.load([
+    {"at": 1000, "pos": 0},
+    {"at": 1200, "pos": 100},
+    {"at": 6200, "pos": 100},
+    {"at": 7200, "pos": 0},
+])
+assert p._script_state(500) is None, "before first keyframe should be None"
+assert p._script_state(9000) is None, "past last keyframe should be None"
+pos, spd = p._script_state(1100)
+assert abs(pos - 0.5) < 1e-6 and abs(spd - 500.0) < 1e-6, (pos, spd)
+pos, spd = p._script_state(3000)          # inside the 5s gap
+assert spd == 0.0, f"gap should read as idle, got {spd}"
+pos, spd = p._script_state(6700)
+assert abs(pos - 0.5) < 1e-6 and abs(spd - 100.0) < 1e-6, (pos, spd)
+print("   fast=500u/s  gap=0  slow=100u/s  OK")
+
+# ── 4. speed vs position mapping ─────────────────────────────────────────────
+print("4. intensity mapping")
+p.apply_settings(vibe_mode="speed", vibe_max_speed=500.0, stroke_min=0.0, stroke_max=1.0)
+assert p._vibe_target(0.5, 500.0) == 1.0
+assert abs(p._vibe_target(0.5, 250.0) - 0.5) < 1e-9
+assert p._vibe_target(0.5, 0.0) == 0.0, "idle must be silent"
+assert p._vibe_target(0.0, 900.0) == 1.0, "over max speed clamps"
+p.apply_settings(vibe_mode="position")
+assert abs(p._vibe_target(0.4, 999.0) - 0.4) < 1e-9
+# floor/ceiling
+p.apply_settings(vibe_mode="speed", stroke_min=0.2, stroke_max=0.8)
+assert abs(p._vibe_target(0.5, 250.0) - 0.5) < 1e-9   # 0.2 + 0.5*0.6
+assert p._vibe_target(0.5, 0.0) == 0.0, "floor must not apply during silence"
+# invert
+p.apply_settings(stroke_min=0.0, stroke_max=1.0, invert=True)
+assert abs(p._vibe_target(0.5, 500.0) - 0.0) < 1e-9
+p.apply_settings(invert=False)
+print("   speed/position/floor/invert  OK")
+
+# ── 5. rate limiting + quantisation over a simulated playback ───────────────
+print("5. simulated playback with a faked clock")
+
+
+class FakeClock:
+    """Stand-in for the time module so wall clock tracks media time."""
+    def __init__(self):
+        self.t = 1000.0          # seconds
+
+    def monotonic(self):
+        return self.t
+
+
+bp3 = FakeBP([GUSH])
+p3 = isync.FunscriptPlayer(bp3)
+
+# 6s of fast strokes (~3/s, ~600 u/s), then 6s of slow strokes (~0.5/s, ~100 u/s)
+actions, t, hi = [], 0, True
+while t < 6000:
+    actions.append({"at": t, "pos": 100 if hi else 0}); hi = not hi; t += 167
+while t < 12000:
+    actions.append({"at": t, "pos": 100 if hi else 0}); hi = not hi; t += 1000
+p3.load(actions)
+p3.apply_settings(vibe_mode="speed", vibe_max_speed=500.0, vibe_smooth=0.30,
+                  stroke_min=0.0, stroke_max=1.0)
+
+real_time = isync.time
+clock = FakeClock()
+isync.time = clock
+try:
+    async def simulate():
+        devs = bp3.scalar_devices()
+        tick = isync.SEND_INTERVAL_MS
+        for i in range(12000 // tick):
+            clock.t += tick / 1000.0
+            await p3._vibe_tick(i * tick, devs)
+    asyncio.run(simulate())
+finally:
+    isync.time = real_time
+
+cmds = [(i, m) for i, m in enumerate(bp3.sent) if m[0] == "ScalarCmd"]
+levels = [round(m[1]["Scalars"][0]["Scalar"], 3) for _, m in cmds]
+bad = [l for l in levels if abs(l / isync.VIBE_STEP - round(l / isync.VIBE_STEP)) > 1e-6]
+if bad:
+    fail(f"levels not quantised to {isync.VIBE_STEP}: {bad[:5]}")
+if max(levels) < 0.95:
+    fail(f"fast section never reached full intensity (max {max(levels)})")
+rate = len(cmds) / 12.0
+if rate > 1000.0 / isync.VIBE_MIN_INTERVAL_MS + 0.5:
+    fail(f"rate limiter breached: {rate:.1f} cmd/s")
+print(f"   {len(cmds)} ScalarCmds over 12s = {rate:.1f}/s "
+      f"(cap {1000.0 / isync.VIBE_MIN_INTERVAL_MS:.1f}/s)")
+print(f"   levels {min(levels):.2f}-{max(levels):.2f}, all multiples of {isync.VIBE_STEP}  OK")
+
+# fast section should sit much higher than the slow section
+# rebuild a level-vs-time trace
+fast = [l for l in levels[:len(levels) // 2]]
+slow = [l for l in levels[len(levels) // 2:]]
+if slow and fast and (sum(slow) / len(slow)) >= (sum(fast) / len(fast)):
+    fail("slow section not quieter than fast section")
+print(f"   mean intensity fast={sum(fast)/len(fast):.2f} slow={sum(slow)/len(slow):.2f}  OK")
+
+# ── 6. pause / stop reset ────────────────────────────────────────────────────
+print("6. pause/stop reset")
+
+
+async def check_pause():
+    p3.pause()
+    await asyncio.sleep(0)
+    assert p3._vibe_level == 0.0, p3._vibe_level
+    assert p3._vibe_last_sent == -1.0, p3._vibe_last_sent
+    assert ("StopAllDevices", {}) in bp3.sent, "pause must stop the device"
+
+
+asyncio.run(check_pause())
+print("   vibe level zeroed + StopAllDevices sent  OK")
+
+# ── 7. mode 'off' ────────────────────────────────────────────────────────────
+print("7. vibe mode off")
+bp4 = FakeBP([GUSH])
+p4 = isync.FunscriptPlayer(bp4)
+p4.load(actions)
+p4.apply_settings(vibe_mode="off")
+assert p4.vibe_mode == "off"
+print("   OK (loop skips the scalar path entirely)")
+
+# ── 8. linear path untouched ─────────────────────────────────────────────────
+print("8. original linear path still works")
+bp5 = FakeBP([HANDY])
+p5 = isync.FunscriptPlayer(bp5)
+p5.load([{"at": 0, "pos": 0}, {"at": 500, "pos": 100}])
+asyncio.run(bp5.linear(1, 200, 0.75))
+mt, pl = bp5.sent[-1]
+assert mt == "LinearCmd" and pl["Vectors"][0]["Position"] == 0.75, (mt, pl)
+print("   LinearCmd unchanged  OK")
+
+# ── 9. manual mode ───────────────────────────────────────────────────────────
+print("9. manual mode")
+
+bp6 = FakeBP([GUSH])
+p6 = isync.FunscriptPlayer(bp6)
+clock6 = FakeClock()
+
+
+async def manual_run():
+    real = isync.time
+    isync.time = clock6
+    try:
+        p6.set_manual(enabled=True, level=0.40)
+        assert p6.manual_enabled and abs(p6.manual_level - 0.40) < 1e-9
+        devs = bp6.scalar_devices()
+        # no script loaded, never played - manual must still drive the toy
+        assert not p6.playing and not p6.actions
+        for i in range(60):
+            clock6.t += isync.SEND_INTERVAL_MS / 1000.0
+            await p6._manual_tick(devs)
+        cmds = [m for m in bp6.sent if m[0] == "ScalarCmd"]
+        levels = [m[1]["Scalars"][0]["Scalar"] for m in cmds]
+        assert levels, "manual produced no commands"
+        assert abs(levels[-1] - 0.40) < 0.051, f"settled at {levels[-1]}, want ~0.40"
+        return len(cmds), levels[-1]
+    finally:
+        isync.time = real
+
+
+n, final = asyncio.run(manual_run())
+print(f"   no script, never played: {n} cmds, settled at {final:.2f}  OK")
+
+# ── 10. pause must not kill a manual session ─────────────────────────────────
+print("10. pause during manual")
+before = len([m for m in bp6.sent if m[0] == "StopAllDevices"])
+
+
+async def pause_during_manual():
+    p6.pause()
+    await asyncio.sleep(0)
+
+
+asyncio.run(pause_during_manual())
+after = len([m for m in bp6.sent if m[0] == "StopAllDevices"])
+assert after == before, "pause stopped the device while manual was on"
+assert p6.manual_enabled, "pause cleared manual"
+print("   video paused, manual keeps running  OK")
+
+# ── 11. turning manual off stops the device ──────────────────────────────────
+print("11. manual off")
+
+
+async def manual_off():
+    p6.set_manual(enabled=False)
+    await asyncio.sleep(0)
+
+
+asyncio.run(manual_off())
+assert not p6.manual_enabled
+assert len([m for m in bp6.sent if m[0] == "StopAllDevices"]) > before
+assert p6._vibe_level == 0.0
+print("   StopAllDevices sent, level zeroed  OK")
+
+# ── 12. explicit stop clears manual ──────────────────────────────────────────
+print("12. stop clears manual")
+
+
+async def stop_clears():
+    p6.set_manual(enabled=True, level=0.5)
+    p6.stop()
+    await asyncio.sleep(0)
+
+
+asyncio.run(stop_clears())
+assert not p6.manual_enabled, "stop left manual armed"
+print("   OK")
+
+# ── 13. script mode still unaffected by manual plumbing ──────────────────────
+print("13. script path regression")
+bp7 = FakeBP([GUSH])
+p7 = isync.FunscriptPlayer(bp7)
+p7.load([{"at": 0, "pos": 0}, {"at": 200, "pos": 100}])
+assert not p7.manual_enabled
+pos, spd = p7._script_state(100)
+assert abs(spd - 500.0) < 1e-6
+print("   OK")
+
+print("\nALL TESTS PASSED")
+
+# ─── vibe fork 1.4: master gain + manual waveforms ──────────────────────────
+print("14. master intensity scales the script path")
+p = isync.FunscriptPlayer(FakeBP([GUSH]))
+p.apply_settings(vibe_mode="speed", vibe_max_speed=500.0)
+p.master = 1.0
+assert p._vibe_target(0.5, 500.0) == 1.0
+p.master = 0.3
+assert abs(p._vibe_target(0.5, 500.0) - 0.30) < 1e-6
+assert abs(p._vibe_target(0.5, 250.0) - 0.15) < 1e-6
+assert p._vibe_target(0.5, 0.0) == 0.0          # silence still beats the gain
+p.apply_settings(stroke_min=0.2, stroke_max=0.8)
+assert abs(p._vibe_target(0.5, 500.0) - 0.24) < 1e-6
+print("   gain multiplies after the intensity limits  OK")
+
+print("15. manual waveforms")
+p = isync.FunscriptPlayer(FakeBP([GUSH]))
+p.master = 1.0
+for shape in isync.MANUAL_SHAPES:
+    p.manual_shape    = shape
+    p.manual_period_s = 4.0
+    p._manual_started = 0.0
+    vals = [p._manual_shape_value(t) for t in (0.0, 1.0, 2.0, 3.0, 3.9)]
+    assert all(0.0 <= v <= 1.0 for v in vals), (shape, vals)
+    if shape == "constant":
+        assert vals == [1.0] * 5
+    if shape == "pulse":
+        assert vals[0] == 1.0 and vals[2] == 0.0
+    if shape in ("wave", "ramp", "tease"):
+        assert len(set(round(v, 3) for v in vals)) > 1, shape
+print("   all shapes stay in range and the cycling ones actually vary  OK")
+
+print("16. hardware step resolution")
+bp = FakeBP([GUSH])
+bp.scalar_devices()
+assert abs(bp.scalar_step() - 0.05) < 1e-9
+print(f"   step={bp.scalar_step():.3f} from reported StepCount  OK")
+
+print("\nFORK 1.4 TESTS PASSED")
+
+print("17. global output kill switch")
+async def _kill_switch():
+    bp = FakeBP([GUSH])
+    p  = isync.FunscriptPlayer(bp)
+    p.master = 1.0
+    p.apply_settings(vibe_mode="speed", vibe_max_speed=500.0)
+    devs = bp.scalar_devices()
+
+    # enabled: manual produces commands
+    p.set_manual(enabled=True, level=0.5, shape="constant")
+    for _ in range(4):
+        await p._manual_tick(devs)
+    assert any(m == "ScalarCmd" for m, _ in bp.sent), "no output while enabled"
+
+    # disabled: loop gate stops everything and a stop is issued
+    bp.sent.clear()
+    p.set_output(False)
+    await asyncio.sleep(0)
+    assert not p.output_enabled
+    assert any(m == "StopAllDevices" for m, _ in bp.sent), "no stop on disable"
+
+    # the loop body must skip while disabled
+    bp.sent.clear()
+    for _ in range(5):
+        if not p.output_enabled:
+            continue
+        await p._manual_tick(devs)
+    assert not [m for m, _ in bp.sent if m == "ScalarCmd"], "sent while disabled"
+
+    # re-enable resumes
+    bp.sent.clear()
+    p.set_output(True)
+    for _ in range(4):
+        await asyncio.sleep(isync.VIBE_MIN_INTERVAL_MS / 1000.0)
+        await p._manual_tick(devs)
+    assert any(m == "ScalarCmd" for m, _ in bp.sent), "no output after re-enable"
+
+asyncio.run(_kill_switch())
+print("   cuts output, stops the device, resumes cleanly  OK")
+
+print("\nFORK 1.5 TESTS PASSED")
+
+print("18. sub-step pulsing")
+async def _substep():
+    bp = FakeBP([GUSH])
+    p  = isync.FunscriptPlayer(bp)
+    devs = bp.scalar_devices()
+    step = bp.scalar_step()
+    p.vibe_smooth = 1.0                      # no EMA lag, test the emitter alone
+
+    # off: a request below one step collapses to the step or to nothing
+    p.apply_settings(vibe_substep=False)
+    bp.sent.clear()
+    for _ in range(3):
+        await asyncio.sleep(0.1)
+        await p._emit_vibe(step * 0.2, devs)
+    levels = [pl["Scalars"][0]["Scalar"] for m, pl in bp.sent if m == "ScalarCmd"]
+    assert all(l in (0.0, step) for l in levels)
+    assert len(set(levels)) == 1, f"substep off should hold steady, got {levels}"
+
+    # on: the same request now alternates between 0 and one step
+    p.apply_settings(vibe_substep=True)
+    p._reset_vibe()
+    bp.sent.clear()
+    t = 0.0
+    for _ in range(60):
+        await asyncio.sleep(0.02)
+        await p._emit_vibe(step * 0.2, devs)
+    levels = [pl["Scalars"][0]["Scalar"] for m, pl in bp.sent if m == "ScalarCmd"]
+    assert step in levels and 0.0 in levels, f"no pulsing: {levels}"
+    assert max(levels) <= step, "pulsing must never exceed one step"
+    print(f"   duty={p._substep_duty:.2f}  {len(levels)} cmds in 1.2s "
+          f"({len(levels)/1.2:.1f}/s)  OK")
+
+    # command rate must stay inside the BLE budget at every duty. Divide by
+    # measured time, not 100 x 20ms: Windows timers round each sleep up to
+    # ~31ms, which inflated the rate by half and failed a correct emitter.
+    for frac in (0.05, 0.2, 0.5, 0.85):
+        p._reset_vibe()
+        bp.sent.clear()
+        t_start = time.monotonic()
+        for _ in range(100):
+            await asyncio.sleep(0.02)
+            await p._emit_vibe(step * frac, devs)
+        n = len([1 for m, _ in bp.sent if m == "ScalarCmd"])
+        rate = n / (time.monotonic() - t_start)
+        assert rate <= 11.0, f"duty {frac}: {rate:.1f} cmd/s exceeds BLE budget"
+
+    # silence still wins instantly, mid-pulse
+    p._reset_vibe()
+    bp.sent.clear()
+    await p._emit_vibe(step * 0.2, devs)
+    p._vibe_level = 0.0
+    await p._emit_vibe(0.0, devs)
+    last = [pl["Scalars"][0]["Scalar"] for m, pl in bp.sent if m == "ScalarCmd"][-1]
+    assert last == 0.0, "silence did not cut through a pulse"
+    assert not p._pwm_on
+
+asyncio.run(_substep())
+print("   rate stays within budget at every duty, silence pre-empts  OK")
+
+print("\nFORK 1.6 TESTS PASSED")
+
+
+# ── 19-21. 1.10 safety: panic, deadman, no re-arm ────────────────────────────
+print("19. panic stop clears manual mode and hits the device")
+async def _panic():
+    bp = FakeBP([GUSH])
+    srv = isync.BackendServer()
+    srv.bp = bp
+    srv.player = isync.FunscriptPlayer(bp)
+    srv._manual["enabled"] = True
+    srv.player.set_manual(enabled=True, level=0.5, shape="tease")
+    assert srv.player.manual_enabled
+    bp.sent.clear()
+    await srv._panic("test")
+    await asyncio.sleep(0.05)   # let the ensure_future(stop_all) land
+    assert not srv.player.manual_enabled, "panic left manual mode on"
+    assert not srv._manual["enabled"], "panic left app-level manual flag on"
+    assert ("StopAllDevices", {}) in bp.sent, f"no StopAllDevices: {bp.sent}"
+asyncio.run(_panic())
+print("   manual off, StopAllDevices sent  OK")
+
+print("20. deadman fires without a heartbeat, stays quiet with one")
+async def _deadman():
+    bp = FakeBP([GUSH])
+    srv = isync.BackendServer()
+    srv.bp = bp
+    srv.player = isync.FunscriptPlayer(bp)
+    srv.player.set_manual(enabled=True, level=0.5, shape="constant")
+    old = (isync.DEADMAN_S, isync.DEADMAN_TICK_S)
+    isync.DEADMAN_S, isync.DEADMAN_TICK_S = 0.3, 0.05
+    try:
+        task = asyncio.create_task(srv._watchdog())
+        # heartbeat keeps it alive
+        for _ in range(8):
+            await asyncio.sleep(0.05)
+            srv._last_seen = time.monotonic()
+        assert srv.player.manual_enabled, "deadman fired despite heartbeats"
+        # silence kills it
+        await asyncio.sleep(0.6)
+        assert not srv.player.manual_enabled, "deadman did not fire"
+        task.cancel()
+    finally:
+        isync.DEADMAN_S, isync.DEADMAN_TICK_S = old
+asyncio.run(_deadman())
+print("   heartbeat holds, silence stops  OK")
+
+print("21. pause keeps manual running, only panic/stop end it")
+async def _pause_vs_panic():
+    bp = FakeBP([GUSH])
+    p = isync.FunscriptPlayer(bp)
+    p.set_manual(enabled=True, level=0.5, shape="tease")
+    p.pause()
+    assert p.manual_enabled, "pause must not kill a deliberate manual session"
+    p.panic()
+    assert not p.manual_enabled
+asyncio.run(_pause_vs_panic())
+print("   pause preserves, panic ends  OK")
+
+print("\nFORK 1.10 TESTS PASSED")
+
+
+# ── 22-23. 1.11 beat mode ────────────────────────────────────────────────────
+print("22. beat script detection")
+def _square(n, iv):
+    return [{"at": i * iv, "pos": 0 if i % 2 == 0 else 99} for i in range(n)]
+import math
+wavy  = [{"at": i * 180, "pos": int(50 + 45 * math.sin(i * 0.7))} for i in range(500)]
+mixed = [{"at": i * 200, "pos": [0, 50, 100, 50][i % 4]} for i in range(500)]
+assert isync.detect_beat_script(_square(400, 468)), "square wave not detected"
+assert not isync.detect_beat_script(wavy), "wavy script misdetected as beat"
+assert not isync.detect_beat_script(mixed), "0/50/100 script misdetected as beat"
+assert not isync.detect_beat_script(_square(10, 468)), "tiny script must not classify"
+print("   square=yes, wavy=no, 0/50/100=no, tiny=no  OK")
+
+print("23. beat mode: one burst per keyframe, silence between, inside BLE budget")
+async def _beat():
+    bp = FakeBP([GUSH])
+    p  = isync.FunscriptPlayer(bp)
+    devs = bp.scalar_devices()
+    real = time.monotonic
+    try:
+        for iv, expect_level in ((1875, 0.10), (468, 0.40), (233, 0.85)):
+            p.load(_square(600, iv))
+            p.apply_settings(vibe_mode="auto")
+            assert p.effective_vibe_mode() == "beat"
+            p._reset_vibe(); bp.sent.clear()
+            t0 = real()
+            for k in range(0, 10000, 20):
+                isync.time.monotonic = lambda: t0 + k / 1000.0
+                await p._vibe_tick(1000 + k, devs)
+            levels = [pl["Scalars"][0]["Scalar"] for m, pl in bp.sent if m == "ScalarCmd"]
+            on  = [l for l in levels if l > 0]
+            off = [l for l in levels if l == 0]
+            beats = 10000 // iv
+            assert abs(len(on) - beats) <= 2, f"{iv}ms: {len(on)} bursts for {beats} beats"
+            assert abs(len(off) - len(on)) <= 1, f"{iv}ms: bursts not followed by silence"
+            assert len(levels) / 10 <= 11, f"{iv}ms: {len(levels)/10:.1f} cmd/s over budget"
+            assert abs(on[0] - expect_level) < 0.03, f"{iv}ms: level {on[0]:.2f} != {expect_level}"
+            print(f"   {iv:4d}ms beat: {len(on)} bursts @ {on[0]:.2f}, {len(levels)/10:.1f} cmd/s  OK")
+        # non-beat script under auto falls back to flow mode (speed before 1.24)
+        p.load(wavy)
+        assert p.effective_vibe_mode() == "flow"
+        # explicit beat on a wavy script still runs (user's choice)
+        p.apply_settings(vibe_mode="beat")
+        assert p.effective_vibe_mode() == "beat"
+    finally:
+        isync.time.monotonic = real
+asyncio.run(_beat())
+print("   auto falls back to flow on a normal script  OK")
+
+print("\nFORK 1.11 TESTS PASSED")
+
+
+# ── 24-25. 1.13 peak picking for dense tracker scripts ───────────────────────
+print("24. dense detection and peak extraction")
+dense30fps = []
+import math
+for i in range(3000):                       # 33ms sampling, ~1 stroke/sec
+    dense30fps.append({"at": i * 33, "pos": int(50 + 40 * math.sin(i * 33 / 1000 * 2 * math.pi))})
+assert isync.is_dense_script(dense30fps), "33ms script not flagged dense"
+assert not isync.is_dense_script(_square(400, 468)), "468ms square flagged dense"
+pk = isync.extract_peaks(dense30fps)
+# 100 cycles = 200 turnarounds (one top, one bottom per stroke)
+assert 170 <= len(pk) <= 210, f"expected ~200 turnarounds for 100 strokes, got {len(pk)}"
+gaps = [pk[i + 1]["at"] - pk[i]["at"] for i in range(len(pk) - 1)]
+assert min(gaps) >= isync.BEAT_PEAK_MIN_SEP_MS, f"peaks too close: {min(gaps)}ms"
+assert not isync.detect_beat_script(dense30fps), "tracker script must not auto-select beat"
+print(f"   3000 frames -> {len(pk)} turnarounds, min gap {min(gaps)}ms  OK")
+
+print("25. beat mode on a dense script stays inside the command budget")
+async def _dense():
+    bp = FakeBP([GUSH])
+    p  = isync.FunscriptPlayer(bp)
+    p.load(dense30fps)
+    assert p._beats is not p.actions, "dense script was not peak-picked"
+    p.apply_settings(vibe_mode="beat")
+    devs = bp.scalar_devices(); real = time.monotonic; t0 = real()
+    try:
+        for k in range(0, 20000, 20):
+            isync.time.monotonic = lambda: t0 + k / 1000.0
+            await p._vibe_tick(5000 + k, devs)
+    finally:
+        isync.time.monotonic = real
+    lv  = [pl["Scalars"][0]["Scalar"] for mm, pl in bp.sent if mm == "ScalarCmd"]
+    on  = [x for x in lv if x > 0]
+    off = [x for x in lv if x == 0]
+    assert len(lv) / 20 <= 11, f"{len(lv)/20:.1f} cmd/s over budget"
+    assert len(off) >= len(on) - 1, "bursts are not separated by silence"
+    assert 30 <= len(on) <= 60, f"expected ~40 bursts in 20s, got {len(on)}"
+    print(f"   {len(on)} bursts / 20s, {len(lv)/20:.1f} cmd/s, {len(off)} silences  OK")
+    # raising prominence must thin the beats out, not crash
+    before = len(p._beats)
+    p.apply_settings(beat_prominence=45)
+    assert len(p._beats) <= before
+asyncio.run(_dense())
+print("   prominence tuning rebuilds the beat list  OK")
+
+print("\nFORK 1.13 TESTS PASSED")
+
+
+# ── 26-28. 1.14 clock sync and offset ────────────────────────────────────────
+print("26. offset shifts beat timing in the right direction")
+async def _offset():
+    beats = [{"at": i * 500, "pos": 0 if i % 2 == 0 else 99} for i in range(200)]
+    real  = time.monotonic
+    fired = {}
+    try:
+        for off in (0, -300, +300):
+            bp = FakeBP([GUSH]); p = isync.FunscriptPlayer(bp)
+            p.load(beats); p.apply_settings(vibe_mode="beat"); p.apply_settings(offset_ms=off)
+            devs = bp.scalar_devices(); t0 = real()
+            p._play_start_wall = t0; p._play_start_media = 0.0; p.playing = True
+            hits = []
+            for k in range(0, 3000, 10):
+                isync.time.monotonic = lambda: t0 + k / 1000.0
+                before = len(bp.sent)
+                await p._vibe_tick(p._current_media_ms() + p.offset_ms, devs)
+                for mm, pl in bp.sent[before:]:
+                    if mm == "ScalarCmd" and pl["Scalars"][0]["Scalar"] > 0:
+                        hits.append(k)
+            fired[off] = hits
+    finally:
+        isync.time.monotonic = real
+    # +offset means the device runs ahead of the video, so a given beat lands
+    # earlier in wall-clock terms; -offset delays it.
+    assert fired[+300][0] < fired[0][0] + 250, f"+offset did not advance: {fired[+300][:3]}"
+    assert fired[-300][0] > fired[0][0] + 250, f"-offset did not delay: {fired[-300][:3]}"
+    print(f"   0ms:{fired[0][:3]}  +300:{fired[+300][:3]}  -300:{fired[-300][:3]}  OK")
+asyncio.run(_offset())
+
+print("27. sync() corrects drift instead of free-running")
+async def _sync():
+    bp = FakeBP([GUSH]); p = isync.FunscriptPlayer(bp)
+    p.load([{"at": i * 500, "pos": 0 if i % 2 == 0 else 99} for i in range(200)])
+    real = time.monotonic; t0 = real()
+    try:
+        isync.time.monotonic = lambda: t0
+        p.play(0.0)
+        # backend has run 10s, video really is at 9.4s: 600ms of drift
+        isync.time.monotonic = lambda: t0 + 10.0
+        assert abs(p._current_media_ms() - 10000) < 5
+        p.sync(9400.0)
+        assert abs(p._current_media_ms() - 9400) < 20, \
+            f"big drift not snapped: {p._current_media_ms():.0f}"
+        # small drift is pulled gently, not snapped
+        isync.time.monotonic = lambda: t0 + 11.0
+        before = p._current_media_ms()
+        p.sync(before - 40)
+        moved = before - p._current_media_ms()
+        assert 0 < moved < 40, f"small drift mishandled: moved {moved:.1f}ms"
+        # rate change re-anchors
+        p.sync(12000.0, rate=2.0)
+        assert p.rate == 2.0
+        isync.time.monotonic = lambda: t0 + 12.0
+        assert abs(p._current_media_ms() - 14000) < 50, \
+            f"rate not applied: {p._current_media_ms():.0f}"
+    finally:
+        isync.time.monotonic = real
+    print("   600ms snapped, 40ms eased, rate 2x honoured  OK")
+asyncio.run(_sync())
+
+print("28. changing the offset mid-playback re-seats the keyframe index")
+async def _reseat():
+    bp = FakeBP([GUSH]); p = isync.FunscriptPlayer(bp)
+    p.load([{"at": i * 500, "pos": 0 if i % 2 == 0 else 99} for i in range(200)])
+    real = time.monotonic; t0 = real()
+    try:
+        isync.time.monotonic = lambda: t0
+        p.play(0.0)
+        isync.time.monotonic = lambda: t0 + 5.0
+        p._last_sent_idx = 9
+        p.apply_settings(offset_ms=-2000)
+        assert p._last_sent_idx != 9, "index not re-seated after offset change"
+    finally:
+        isync.time.monotonic = real
+    print("   index re-seated  OK")
+asyncio.run(_reseat())
+
+print("\nFORK 1.14 TESTS PASSED")
+
+
+# ── 29-30. 1.15 signal preview ───────────────────────────────────────────────
+print("29. preview is a no-op until a client asks for it")
+async def _preview_off():
+    bp = FakeBP([GUSH]); p = isync.FunscriptPlayer(bp)
+    p.load([{"at": i * 500, "pos": 0 if i % 2 == 0 else 99} for i in range(50)])
+    p.apply_settings(vibe_mode="beat")
+    devs = bp.scalar_devices(); real = time.monotonic; t0 = real()
+    try:
+        for k in range(0, 2000, 20):
+            isync.time.monotonic = lambda: t0 + k / 1000.0
+            await p._vibe_tick(k, devs)
+    finally:
+        isync.time.monotonic = real
+    assert p.preview_cb is None
+    assert p._preview_buf == [], "buffer filled with no subscriber"
+asyncio.run(_preview_off())
+print("   no buffering, no callback  OK")
+
+print("30. preview streams bounded batches and marks real commands")
+async def _preview_on():
+    bp = FakeBP([GUSH]); p = isync.FunscriptPlayer(bp)
+    p.load([{"at": i * 500, "pos": 0 if i % 2 == 0 else 99} for i in range(50)])
+    p.apply_settings(vibe_mode="beat")
+    frames = []
+    # v1.18 added a second argument; a one-arg callback now raises and the
+    # player swallows it, which is exactly how this test caught the change.
+    p.preview_cb = lambda samples, script=None: frames.append(samples)
+    devs = bp.scalar_devices(); real = time.monotonic; t0 = real()
+    try:
+        for k in range(0, 5000, 20):
+            isync.time.monotonic = lambda: t0 + k / 1000.0
+            await p._vibe_tick(k, devs)
+    finally:
+        isync.time.monotonic = real
+    assert frames, "no preview frames emitted"
+    samples = [s for f in frames for s in f]
+    assert len(p._preview_buf) <= isync.PREVIEW_HZ * 2, "buffer grew unbounded"
+    for s in samples:
+        assert set(s) == {"t", "tg", "lv", "m", "s"}, f"bad sample shape {s}"
+        assert 0.0 <= s["lv"] <= 1.0 and 0.0 <= s["tg"] <= 1.0
+    sent = [s for s in samples if s["s"]]
+    cmds = [1 for mm, _ in bp.sent if mm == "ScalarCmd"]
+    assert len(sent) == len(cmds), f"{len(sent)} marked vs {len(cmds)} actual commands"
+    # sampling is throttled, not once per 20ms tick
+    assert len(samples) < 5000 / 20, f"preview not throttled: {len(samples)} samples"
+    print(f"   {len(frames)} frames, {len(samples)} samples, {len(sent)} commands marked  OK")
+asyncio.run(_preview_on())
+
+print("\nFORK 1.15 TESTS PASSED")
+
+
+# ── 31-32. 1.18 script window in the signal preview ──────────────────────────
+print("31. preview carries the visible slice of the script")
+async def _script_window():
+    bp = FakeBP([GUSH])
+    p  = isync.FunscriptPlayer(bp)
+    beats = [{"at": i * 500, "pos": 0 if i % 2 == 0 else 99} for i in range(400)]
+    p.load(beats)
+    p.apply_settings(vibe_mode="beat")
+    frames = []
+    p.preview_cb = lambda samples, script=None: frames.append((samples, script))
+    devs = bp.scalar_devices(); real = time.monotonic; t0 = real()
+    try:
+        for k in range(0, 4000, 20):
+            isync.time.monotonic = lambda: t0 + k / 1000.0
+            await p._vibe_tick(60000 + k, devs)
+    finally:
+        isync.time.monotonic = real
+
+    windows = [w for _, w in frames if w]
+    assert windows, "no script window ever sent"
+    w = windows[0]
+    assert set(w) >= {"t0", "t1", "pts"}, f"bad window shape {list(w)}"
+    assert w["t0"] < 60000 < w["t1"], "window does not bracket the playhead"
+    assert len(w["pts"]) <= isync.PREVIEW_SCRIPT_MAX, f"{len(w['pts'])} points, not downsampled"
+    for at, pos in w["pts"]:
+        assert w["t0"] <= at <= w["t1"], f"point {at} outside the window"
+        assert 0 <= pos <= 100
+    assert "beats" in w and w["beats"], "beat mode sent no beat markers"
+    # windows are throttled below the sample batch rate
+    assert len(windows) < len(frames), "a window on every frame is too chatty"
+    print(f"   {len(frames)} frames, {len(windows)} windows, "
+          f"{len(w['pts'])} pts, {len(w['beats'])} beats  OK")
+asyncio.run(_script_window())
+
+print("32. dense scripts are downsampled and non-beat modes send no markers")
+async def _dense_window():
+    bp = FakeBP([GUSH])
+    p  = isync.FunscriptPlayer(bp)
+    dense = [{"at": i * 33, "pos": int(50 + 40 * math.sin(i * 33 / 1000 * 2 * math.pi))}
+             for i in range(3000)]
+    p.load(dense)
+    p.apply_settings(vibe_mode="speed")
+    frames = []
+    p.preview_cb = lambda samples, script=None: frames.append((samples, script))
+    devs = bp.scalar_devices(); real = time.monotonic; t0 = real()
+    try:
+        for k in range(0, 3000, 20):
+            isync.time.monotonic = lambda: t0 + k / 1000.0
+            await p._vibe_tick(40000 + k, devs)
+    finally:
+        isync.time.monotonic = real
+    w = next(w for _, w in frames if w)
+    raw = isync.PREVIEW_SCRIPT_BACK + isync.PREVIEW_SCRIPT_AHEAD
+    assert len(w["pts"]) <= isync.PREVIEW_SCRIPT_MAX, f"{len(w['pts'])} points from a 33ms script"
+    assert "beats" not in w, "speed mode should not send beat markers"
+    assert w["pts"][0][0] < w["pts"][-1][0], "points out of order"
+    print(f"   {raw}ms of 33ms keyframes -> {len(w['pts'])} pts, no markers  OK")
+asyncio.run(_dense_window())
+
+print("\nFORK 1.18 TESTS PASSED")
+
+
+# ── 33-35. 1.19 works without a device attached ──────────────────────────────
+print("33. a script loads and the scope runs with no device connected")
+async def _no_device():
+    bp = FakeBP([])                       # nothing attached
+    p  = isync.FunscriptPlayer(bp)
+    p.load([{"at": i * 500, "pos": 0 if i % 2 == 0 else 99} for i in range(200)])
+    assert p.actions, "script did not load without a device"
+    assert bp.scalar_devices() == [], "fixture should report no devices"
+
+    frames = []
+    p.preview_cb = lambda samples, script=None: frames.append((samples, script))
+    p.apply_settings(vibe_mode="beat")
+    real = time.monotonic; t0 = real()
+    try:
+        for k in range(0, 3000, 20):
+            isync.time.monotonic = lambda: t0 + k / 1000.0
+            # the loop passes an empty device list when nothing is attached
+            await p._vibe_tick(k, [])
+    finally:
+        isync.time.monotonic = real
+    assert frames, "no preview output without a device"
+    assert any(w for _, w in frames), "no script window without a device"
+    assert not bp.sent, f"commands escaped with no device: {bp.sent[:3]}"
+    print(f"   {len(frames)} frames, zero commands sent  OK")
+asyncio.run(_no_device())
+
+print("34. an idle client cannot emit anything")
+async def _idle_client():
+    bp = isync.ButtplugClient("ws://127.0.0.1:1")   # never connected
+    assert not bp._is_ws_open()
+    await bp.stop_all()                              # must not raise
+    await bp.scalar(0, [(0, "Vibrate")], 0.5)
+    assert bp.scalar_devices() == []
+    p = isync.FunscriptPlayer(bp)
+    p.load([{"at": 0, "pos": 0}, {"at": 500, "pos": 99}])
+    p.panic()                                        # must not raise
+    print("   stop_all, scalar and panic are all safe when disconnected  OK")
+asyncio.run(_idle_client())
+
+print("35. connecting a device keeps the script that was already loaded")
+async def _carry():
+    srv = isync.BackendServer()
+    assert srv.player is not None, "no idle player at startup"
+    acts = [{"at": i * 400, "pos": i % 2 * 99} for i in range(120)]
+    srv.player.load(acts)
+    assert len(srv.player.actions) == 120
+
+    # what the connect handler does with the old player's script
+    carried = srv.player.actions
+    srv.bp = FakeBP([GUSH])
+    srv.player = isync.FunscriptPlayer(srv.bp)
+    if carried and srv._pending_actions is None:
+        srv.player.load(carried)
+    assert len(srv.player.actions) == 120, "script dropped when the device connected"
+    print("   120 keyframes survived the player swap  OK")
+asyncio.run(_carry())
+
+print("\nFORK 1.19 TESTS PASSED")
+
+
+# ── 36-39. 1.21 graded beat scripts, thinning, stop routes through panic ─────
+import random
+print("36. graded beat detection: tempo grid separates it from a stroker script")
+_PAIRS = [(11, 90), (34, 81), (20, 70), (5, 95), (40, 75)]
+def _graded(n, iv, pairs=_PAIRS):
+    out = []
+    for i in range(n):
+        lo, hi = pairs[(i // 16) % len(pairs)]
+        out.append({"at": i * iv, "pos": lo if i % 2 == 0 else hi})
+    return out
+_rng = random.Random(7)
+_t, _hand = 0, []
+for i in range(400):                         # same shape, human timing
+    _hand.append({"at": _t, "pos": 10 if i % 2 == 0 else 90})
+    _t += _rng.randint(230, 1100)
+assert isync.detect_beat_script(_graded(400, 400)) == "graded", "graded script missed"
+assert isync.detect_beat_script(_square(400, 468)) == "edge", "0/100 script not edge"
+assert isync.detect_beat_script(_hand) == "", \
+    f"off-grid stroker misread as beat (grid {isync.tempo_grid_score(_hand):.2f})"
+assert isync.detect_beat_script(dense30fps) == "", "tracker script misread as graded"
+assert isync.detect_beat_script(wavy) == "", "wavy script misread as graded"
+print(f"   graded=graded, square=edge, stroker/dense/wavy=none "
+      f"(stroker grid {isync.tempo_grid_score(_hand):.2f})  OK")
+
+print("37. graded scripts take burst level from swing height, not pace")
+async def _graded_level():
+    bp = FakeBP([GUSH])
+    p  = isync.FunscriptPlayer(bp)
+    # first half swings 80, second half swings 30, identical tempo throughout
+    acts = [{"at": i * 400, "pos": (10 if i % 2 == 0 else 90) if i < 200
+             else (35 if i % 2 == 0 else 65)} for i in range(400)]
+    p.load(acts)
+    p.apply_settings(vibe_mode="auto")
+    assert p._script_beat_kind == "graded" and p.effective_vibe_mode() == "beat"
+    assert p._beat_level_src == "amp"
+    devs = bp.scalar_devices(); real = time.monotonic; t0 = real()
+    def levels_between(a, b):
+        p._reset_vibe(); bp.sent.clear()
+        async def run():
+            for k in range(a, b, 20):
+                isync.time.monotonic = lambda: t0 + k / 1000.0
+                await p._vibe_tick(k, devs)
+        return run
+    try:
+        await levels_between(10000, 20000)()
+        big = [pl["Scalars"][0]["Scalar"] for m, pl in bp.sent if m == "ScalarCmd" and pl["Scalars"][0]["Scalar"] > 0]
+        await levels_between(110000, 120000)()
+        small = [pl["Scalars"][0]["Scalar"] for m, pl in bp.sent if m == "ScalarCmd" and pl["Scalars"][0]["Scalar"] > 0]
+    finally:
+        isync.time.monotonic = real
+    assert big and small, "no bursts fired"
+    assert max(big) > 0.9, f"largest swing should reach full: {max(big):.2f}"
+    assert abs(max(small) - 30 / 80) < 0.08, f"30/80 swing gave {max(small):.2f}"
+    print(f"   swing 80 -> {max(big):.2f}, swing 30 -> {max(small):.2f}  OK")
+asyncio.run(_graded_level())
+
+print("38. beats too fast for the device are merged, loudest swing kept")
+# 160ms apart: not dense (so not peak-picked) but inside the thinning window
+fast = [{"at": i * 160, "pos": (0 if i % 2 == 0 else (40 if i % 7 else 100))} for i in range(300)]
+assert not isync.is_dense_script(fast)
+ann  = isync.FunscriptPlayer._annotate_beats(fast)
+thin = isync.FunscriptPlayer._thin_beats([dict(b) for b in ann])
+gaps = [thin[i + 1]["at"] - thin[i]["at"] for i in range(len(thin) - 1)]
+assert min(gaps) >= isync.BEAT_THIN_MIN_MS, f"thinned beats still {min(gaps)}ms apart"
+assert len(thin) < len(fast), "nothing was thinned"
+# every kept beat carries the loudest swing of the run it swallowed
+for i, b in enumerate(thin):
+    end = thin[i + 1]["at"] if i + 1 < len(thin) else float("inf")
+    run = [a["_amp"] or 0 for a in ann if b["at"] <= a["at"] < end]
+    assert b["_amp"] == max(run), f"beat @{b['at']}: kept {b['_amp']}, run max {max(run)}"
+print(f"   160ms beats -> {len(thin)} kept of {len(fast)}, loudest swing carried  OK")
+
+# The budget sweep that caught 1.20-dev at 13.3 cmd/s: every beat is an on and
+# an off, so any tempo the thinning lets through has to fit in ~11/s.
+async def _beat_rate(acts):
+    bp = FakeBP([GUSH])
+    p  = isync.FunscriptPlayer(bp)
+    p.load(acts)
+    p.apply_settings(vibe_mode="beat")
+    devs = bp.scalar_devices(); real = time.monotonic; t0 = real()
+    try:
+        for k in range(0, 20000, 20):
+            isync.time.monotonic = lambda: t0 + k / 1000.0
+            await p._vibe_tick(k, devs)
+    finally:
+        isync.time.monotonic = real
+    return len([1 for m, _ in bp.sent if m == "ScalarCmd"]) / 20, p
+worst = 0.0
+for iv in (100, 140, 150, 160, 170, 180, 190, 200, 233):
+    for acts in (_square(600, iv), _graded(600, iv)):
+        rate, pl = asyncio.run(_beat_rate(acts))
+        assert rate <= 11.0, f"{iv}ms {pl._script_beat_kind or 'dense'}: {rate:.1f} cmd/s over budget"
+        worst = max(worst, rate)
+_, pl = asyncio.run(_beat_rate(fast))
+assert not pl._beats_peak_picked, "thinned is not the same as peak-picked"
+print(f"   100-233ms edge and graded beats, worst {worst:.1f} cmd/s  OK")
+p_empty = isync.FunscriptPlayer(FakeBP([GUSH]))
+p_empty.load(dense30fps); assert p_empty._beats_peak_picked
+p_empty.load([]);         assert not p_empty._beats_peak_picked, "stale beatPicked after empty load"
+print("   empty load clears the peak-picked flag  OK")
+
+print("39. the stop message goes through _panic and clears app-level manual")
+async def _stop_msg():
+    bp = FakeBP([GUSH])
+    srv = isync.BackendServer()
+    srv.bp = bp
+    srv.player = isync.FunscriptPlayer(bp)
+    srv._manual["enabled"] = True
+    srv.player.set_manual(enabled=True, level=0.5, shape="tease")
+    bp.sent.clear()
+    await srv._handle(None, {"type": "stop"})
+    await asyncio.sleep(0.05)
+    assert not srv._manual["enabled"], "stop left the app-level manual flag armed"
+    assert not srv.player.manual_enabled
+    assert ("StopAllDevices", {}) in bp.sent, f"no StopAllDevices: {bp.sent}"
+asyncio.run(_stop_msg())
+print("   manual disarmed at both levels, StopAllDevices sent  OK")
+
+print("\nFORK 1.21 TESTS PASSED")
+
+
+# ── 40-41. 1.22 tease strength build-up ──────────────────────────────────────
+print("40. tease strength builds from the starting level to full over N buzzes")
+async def _amp_build():
+    bp = FakeBP([GUSH])
+    p  = isync.FunscriptPlayer(bp)
+    p.set_manual(shape="tease", period=1.0, on_ms=400, build=0,
+                 build_amp=4, amp_from=0.25)
+    # sample mid-buzz and mid-gap of each cycle, in order, so the cycle
+    # counter sees every wrap the way the real loop does
+    on, off = [], []
+    for k in range(7):
+        on.append(p._manual_shape_value(100.0 + k + 0.1))
+        off.append(p._manual_shape_value(100.0 + k + 0.7))
+    want = [0.25, 0.4375, 0.625, 0.8125, 1.0, 1.0, 1.0]
+    assert all(abs(a - b) < 1e-9 for a, b in zip(on, want)), f"strength ramp {on}"
+    assert all(v == 0.0 for v in off), f"gaps must stay silent: {off}"
+    # off by default: every buzz at full strength, as before
+    q = isync.FunscriptPlayer(FakeBP([GUSH]))
+    q.set_manual(shape="tease", period=1.0, on_ms=400)
+    assert [q._manual_shape_value(200.0 + k + 0.1) for k in range(3)] == [1.0, 1.0, 1.0]
+    # length and strength build independently and together
+    r = isync.FunscriptPlayer(FakeBP([GUSH]))
+    r.set_manual(shape="tease", period=1.0, on_ms=400, build=4, build_amp=2, amp_from=0.5)
+    assert r._manual_shape_value(300.1) == 0.5
+    assert r._manual_shape_value(300.3) == 0.0, "first buzz should be short with length build"
+    # the frontend's field names reach the player
+    srv = isync.BackendServer()
+    srv.bp = FakeBP([GUSH]); srv.player = isync.FunscriptPlayer(srv.bp)
+    await srv._handle(None, {"type": "manual", "shape": "tease", "buildAmp": 6, "ampFrom": 0.3})
+    assert srv.player.manual_build_amp == 6 and abs(srv.player.manual_amp_from - 0.3) < 1e-9
+    assert srv._manual["build_amp"] == 6, "app-level copy must survive a reconnect"
+    assert not srv.player.manual_enabled, "setting a build must not switch manual on"
+    print(f"   {', '.join(f'{v:.2f}' for v in on)}; default full; plumbing OK")
+asyncio.run(_amp_build())
+
+print("41. a weak buzz under the motor floor is held at one step, not chopped")
+async def _amp_floor():
+    bp = FakeBP([GUSH])
+    p  = isync.FunscriptPlayer(bp)
+    p.apply_settings(vibe_substep=True)
+    p.set_manual(enabled=True, level=0.5, shape="tease", period=2.0, on_ms=800,
+                 build_amp=10, amp_from=0.02)   # first buzz asks for 1% of motor
+    devs = bp.scalar_devices(); step = bp.scalar_step()
+    real = time.monotonic; t0 = real(); bp.sent.clear()
+    try:
+        for k in range(0, 700, 20):              # inside the first 800 ms buzz
+            isync.time.monotonic = lambda: t0 + k / 1000.0
+            await p._manual_tick(devs)
+    finally:
+        isync.time.monotonic = real
+    lv = [pl["Scalars"][0]["Scalar"] for m, pl in bp.sent if m == "ScalarCmd"]
+    assert lv and all(abs(x - step) < 1e-9 for x in lv), f"buzz was chopped: {lv}"
+    print(f"   {len(lv)} command(s), all at one step ({step:.2f})  OK")
+asyncio.run(_amp_floor())
+
+print("\nFORK 1.22 TESTS PASSED")
+
+
+# ── 42-44. 1.23 dedicated vibrator tracks ────────────────────────────────────
+import tempfile as _tf, shutil as _sh
+print("42. a sibling vibrator track is found by name, other axes are not")
+_d = _tf.mkdtemp()
+try:
+    def _touch(name, acts=None):
+        with open(os.path.join(_d, name), "w", encoding="utf-8") as f:
+            json.dump({"actions": acts or [{"at": 0, "pos": 0}, {"at": 1000, "pos": 50}]}, f)
+    for n in ("Scene One.funscript", "Scene One.vib.funscript", "Scene One.roll.funscript",
+              "Scene Two.funscript", "Scene Two vibe.funscript", "Scene Three.funscript",
+              "Other.vib.funscript"):
+        _touch(n)
+    j = lambda n: os.path.join(_d, n)
+    assert isync.find_vibe_track(j("Scene One.funscript")) == j("Scene One.vib.funscript")
+    assert isync.find_vibe_track(j("Scene Two.funscript")) == j("Scene Two vibe.funscript")
+    assert isync.find_vibe_track(j("Scene Three.funscript")) is None, "borrowed another scene's track"
+    assert isync.find_vibe_track(j("Scene One.vib.funscript")) is None, "a vibe track has no vibe track"
+    assert isync.is_vibe_track_name("x/Scene One.vib.funscript")
+    assert not isync.is_vibe_track_name("x/Vibes.funscript"), "a one-word title is not a suffix"
+    # the stroker still gets the main script by default
+    files, default = isync.find_funscripts(j("Scene One.mp4"))
+    assert default == j("Scene One.funscript"), default
+    print("   .vib and ' vibe' found, .roll and other scenes ignored, main stays default  OK")
+
+    print("43. the vibrator plays the track as intensity; the stroker keeps the main script")
+    async def _track_play():
+        bp = FakeBP([GUSH, HANDY])
+        p  = isync.FunscriptPlayer(bp)
+        # main script: fast strokes, would be loud in speed mode
+        p.load([{"at": i * 150, "pos": 0 if i % 2 == 0 else 100} for i in range(200)])
+        # track: silent for 2 s, then holds 60% across a 10 s gap
+        p.load_vibe_track([{"at": 0, "pos": 0}, {"at": 2000, "pos": 0},
+                           {"at": 2001, "pos": 60}, {"at": 12000, "pos": 60}])
+        p.apply_settings(vibe_mode="speed", invert=True)
+        assert p.using_vibe_track()
+        devs = bp.scalar_devices(); real = time.monotonic; t0 = real()
+        lv = {}
+        try:
+            for k in range(0, 9000, 20):
+                isync.time.monotonic = lambda: t0 + k / 1000.0
+                await p._vibe_tick(k, devs)
+                lv[k] = p._vibe_last_sent
+        finally:
+            isync.time.monotonic = real
+        assert lv[1500] in (0.0, -1.0), f"track is silent at 1.5 s, got {lv[1500]}"
+        assert abs(lv[8000] - 0.60) < 0.03, f"track holds 60% through the gap, got {lv[8000]}"
+        # switched off: back to deriving from the strokes
+        p.apply_settings(vibe_track=False)
+        assert not p.using_vibe_track() and p.effective_vibe_mode() == "speed"
+        # vibe mode off silences the track too
+        p.apply_settings(vibe_track=True, vibe_mode="off")
+        assert not p.using_vibe_track()
+    asyncio.run(_track_play())
+    print("   silent then 60% held across a gap, invert ignored, toggle falls back  OK")
+
+    print("44. loading a script picks up its track and a device connect keeps it")
+    async def _track_load():
+        _touch("Scene Four.funscript", [{"at": i * 300, "pos": i % 2 * 100} for i in range(50)])
+        _touch("Scene Four.vib.funscript", [{"at": 0, "pos": 40}, {"at": 5000, "pos": 40}])
+        srv = isync.BackendServer()
+        await srv._load_script(j("Scene Four.funscript"))
+        assert len(srv.player.vibe_track) == 2 and srv._vibe_track_path.endswith("vib.funscript")
+        # a folder with only a vibe track: it is its own track
+        await srv._load_script(j("Other.vib.funscript"))
+        assert srv.player.vibe_track and srv.player.using_vibe_track()
+        # scripts without one clear the previous track
+        await srv._load_script(j("Scene Three.funscript"))
+        assert srv.player.vibe_track == [] and srv._vibe_track_path is None
+        # the connect handler's carry, done by hand as in test 35
+        await srv._load_script(j("Scene Four.funscript"))
+        carried, carried_track = srv.player.actions, srv.player.vibe_track
+        srv.bp = FakeBP([GUSH]); srv.player = isync.FunscriptPlayer(srv.bp)
+        srv.player.load(carried); srv.player.load_vibe_track(carried_track)
+        assert srv.player.using_vibe_track()
+    asyncio.run(_track_load())
+    print("   track loaded with its script, cleared without one, survives the swap  OK")
+finally:
+    _sh.rmtree(_d, ignore_errors=True)
+
+print("\nFORK 1.23 TESTS PASSED")
+
+
+# ── 45-47. 1.24 flow mode: rendered intensity track ──────────────────────────
+def _strokes(t_from, t_to, iv, lo=0, hi=100):
+    out, k = [], 0
+    for t in range(t_from, t_to, iv):
+        out.append({"at": t, "pos": lo if k % 2 == 0 else hi}); k += 1
+    return out
+# fast 0-10 s, slow 10-20 s, nothing 20-30 s, fast again 30-40 s
+_mixed = (_strokes(0, 10000, 200) + _strokes(10000, 20000, 800)
+          + _strokes(30000, 40000, 200))
+_mixed_half = (_strokes(0, 10000, 200, 25, 75) + _strokes(10000, 20000, 800, 25, 75)
+               + _strokes(30000, 40000, 200, 25, 75))
+
+print("45. flow follows the scene, levels itself per script, fades out, rises on time")
+def _lv(t0_levels, t):
+    t0, lv = t0_levels
+    j = (t - t0) // isync.FLOW_STEP_MS
+    return lv[j] if 0 <= j < len(lv) else 0.0
+def _mean(r, a, b):
+    xs = [_lv(r, t) for t in range(a, b, 25)]
+    return sum(xs) / len(xs)
+r = isync.render_flow(_mixed, isync.extract_peaks(_mixed), rhythm=0.0)
+fast, slow = _mean(r, 3000, 9000), _mean(r, 13000, 19000)
+assert fast > 0.8, f"busy section should be near full, got {fast:.2f}"
+assert 0.1 < slow < 0.6, f"slow section should be clearly lower, got {slow:.2f}"
+assert _lv(r, 25000) == 0.0, f"tail must fade to silence, got {_lv(r, 25000):.3f}"
+assert _lv(r, 30150) > 0.3, f"lookahead: should already be rising at 30.15 s, got {_lv(r, 30150):.2f}"
+r_half = isync.render_flow(_mixed_half, isync.extract_peaks(_mixed_half, 10), rhythm=0.0)
+assert abs(_mean(r_half, 3000, 9000) - fast) < 0.1, "half-amplitude script should level to the same"
+r_gain = isync.render_flow(_mixed, isync.extract_peaks(_mixed), rhythm=0.0, gain=2.0)
+assert _mean(r_gain, 13000, 19000) > slow * 1.5, "sensitivity should lift quiet parts"
+r_sharp = isync.render_flow(_mixed, isync.extract_peaks(_mixed), smooth=0.0, rhythm=0.0)
+r_soft  = isync.render_flow(_mixed, isync.extract_peaks(_mixed), smooth=1.0, rhythm=0.0)
+tail = lambda rr: next(t for t in range(20000, 30000, 25) if _lv(rr, t) == 0.0)
+assert tail(r_sharp) < tail(r_soft), "more smoothness should fade out more slowly"
+print(f"   fast {fast:.2f}, slow {slow:.2f}, half-amp fast {_mean(r_half, 3000, 9000):.2f}, "
+      f"silent by {tail(r)/1000:.1f} s  OK")
+
+print("46. rhythm adds a pulse per stroke and every setting stays inside the BLE budget")
+async def _flow_budget():
+    worst = 0.0
+    for rhythm in (0.0, 0.5, 1.0):
+        for iv in (100, 190, 300, 600):
+            bp = FakeBP([GUSH]); p = isync.FunscriptPlayer(bp)
+            p.load(_strokes(0, 22000, iv))
+            p.apply_settings(vibe_mode="flow", flow_rhythm=rhythm)
+            devs = bp.scalar_devices(); real = time.monotonic; t0 = real()
+            try:
+                for k in range(0, 20000, 20):
+                    isync.time.monotonic = lambda: t0 + k / 1000.0
+                    await p._vibe_tick(1000 + k, devs)
+            finally:
+                isync.time.monotonic = real
+            lv = [pl["Scalars"][0]["Scalar"] for m, pl in bp.sent if m == "ScalarCmd"]
+            rate = len(lv) / 20
+            assert rate <= 11.0, f"rhythm {rhythm} @ {iv}ms: {rate:.1f} cmd/s over budget"
+            worst = max(worst, rate)
+            active = lv[5:-5]
+            if rhythm == 1.0 and iv >= 300:
+                assert 0.0 in active, f"rhythm 1 @ {iv}ms should burst with silence between"
+            if rhythm == 0.0:
+                assert 0.0 not in active, f"rhythm 0 @ {iv}ms should never drop out: {active[:12]}"
+    return worst
+print(f"   rhythm 0/0.5/1 x 100-600 ms strokes, worst {asyncio.run(_flow_budget()):.1f} cmd/s  OK")
+
+print("47. auto uses flow, the preview carries the rendered track, tuning re-renders")
+async def _flow_plumb():
+    srv = isync.BackendServer()
+    got = []
+    srv.player.overview_cb = lambda o: got.append(o)
+    srv.player.apply_settings(vibe_mode="auto")
+    srv.player.load(wavy)
+    assert srv.player.effective_vibe_mode() == "flow", "a normal script should get flow"
+    srv.player.load(_mixed)          # 0/100 strokes on a grid: auto calls it a beat script
+    assert srv.player.effective_vibe_mode() == "beat"
+    srv.player.apply_settings(vibe_mode="flow")
+    assert got and len(got[-1]["levels"]) <= isync.FLOW_OVERVIEW_POINTS and max(got[-1]["levels"]) > 0.8
+    before = list(srv.player._flow)
+    await srv._handle(None, {"type": "settings", "flowSmooth": 0.9, "flowRhythm": 0.8, "flowGain": 1.5})
+    assert srv.player.flow_smooth == 0.9 and srv.player.flow_gain == 1.5
+    assert srv.player._flow != before and len(got) >= 2, "tuning must re-render and notify"
+    w = srv.player._preview_script_window(5000)
+    assert w and w.get("flow") and all(0 <= v <= 1 for _, v in w["flow"])
+    # a vibe track wins over flow and the preview then has no flow line
+    srv.player.load_vibe_track([{"at": 0, "pos": 50}, {"at": 40000, "pos": 50}])
+    assert "flow" not in srv.player._preview_script_window(5000)
+asyncio.run(_flow_plumb())
+print("   overview on load and on tuning, flow points in the preview window  OK")
+
+print("\nFORK 1.24 TESTS PASSED")
+
+
+# ── 48-51. 1.25 the backend decides which tab drives ─────────────────────────
+class FakeTab:
+    """Stands in for a browser tab's websocket."""
+    def __init__(self, name):
+        self.name = name
+        self.remote_address = (name, 0)
+        self.out = []
+    async def send(self, data):
+        self.out.append(json.loads(data))
+    def last_status(self):
+        return next(m for m in reversed(self.out) if m.get("type") == "status")
+
+async def _two_tabs():
+    srv = isync.BackendServer()
+    srv.bp = FakeBP([GUSH]); srv.player = isync.FunscriptPlayer(srv.bp)
+    a, b = FakeTab("A"), FakeTab("B")
+    srv.clients |= {a, b}
+    await srv._route(a, {"type": "hello", "tab": "A", "scene": "1", "title": "Scene One"})
+    await srv._route(b, {"type": "hello", "tab": "B", "scene": "2", "title": "Scene Two"})
+    return srv, a, b
+
+print("48. one driver at a time; play takes over; other tabs cannot drive but can stop")
+async def _arbitration():
+    srv, a, b = await _two_tabs()
+    await srv._route(a, {"type": "claim"})
+    assert srv._driver is a and b.last_status()["driver"]["tab"] == "A"
+    await srv._route(a, {"type": "presence", "playing": True})
+    # a quiet claim (tab became visible) does not steal from a playing tab
+    await srv._route(b, {"type": "claim"})
+    assert srv._driver is a, "visible-tab claim stole the device from a playing tab"
+    assert b.last_status()["driver"]["title"] == "Scene One", "claimant should learn who drives"
+    # driving messages from B are ignored
+    await srv._route(b, {"type": "manual", "enabled": True, "level": 0.9, "shape": "tease"})
+    assert not srv.player.manual_enabled and srv._manual["shape"] != "tease"
+    # pressing play in B takes over
+    await srv._route(b, {"type": "play", "time": 0})
+    assert srv._driver is b
+    await srv._route(b, {"type": "manual", "enabled": True, "level": 0.5, "shape": "constant"})
+    assert srv.player.manual_enabled
+    # A is no longer driving but its kill switches still work
+    await srv._route(a, {"type": "manual", "enabled": False, "shape": "wave", "level": 1.0})
+    assert not srv.player.manual_enabled, "manual off must work from any tab"
+    assert srv._manual["shape"] == "constant", "a non-driver must not change the pattern"
+    await srv._route(a, {"type": "output", "enabled": False})
+    assert srv._output is False and not srv.player.output_enabled
+    await srv._route(a, {"type": "output", "enabled": True})
+    assert srv._output is False, "only the driver may turn output back on"
+    # the funscript list goes to the tab that asked, nobody else
+    b.out.clear(); a.out.clear()
+    await srv._route(a, {"type": "findFunscripts", "videoPath": ""})
+    assert any(m["type"] == "funscripts" for m in a.out) and not b.out
+asyncio.run(_arbitration())
+print("   quiet claims respect a playing tab, play wins, stop/mute work from anywhere  OK")
+
+print("49. the driving tab leaving stops the device even with other tabs open")
+async def _driver_leaves():
+    srv, a, b = await _two_tabs()
+    await srv._route(a, {"type": "claim"})
+    await srv._route(a, {"type": "manual", "enabled": True, "level": 0.5, "shape": "tease"})
+    srv.bp.sent.clear()
+    # a spectator leaving changes nothing
+    await srv._client_gone(b)
+    assert srv.player.manual_enabled, "a spectator closing must not stop the driver's session"
+    c = FakeTab("C"); srv.clients.add(c)
+    await srv._route(c, {"type": "hello", "tab": "C"})
+    await srv._client_gone(a)
+    await asyncio.sleep(0.05)
+    assert srv._driver is None and not srv.player.manual_enabled
+    assert ("StopAllDevices", {}) in srv.bp.sent
+    assert c.last_status()["driver"] is None, "remaining tabs must learn nobody drives"
+asyncio.run(_driver_leaves())
+print("   spectator leaves: runs on; driver leaves: panic, others told  OK")
+
+print("50. the deadman follows the driver, not whichever tab is still talking")
+async def _deadman_driver():
+    srv, a, b = await _two_tabs()
+    await srv._route(a, {"type": "claim"})
+    await srv._route(a, {"type": "manual", "enabled": True, "level": 0.5, "shape": "constant"})
+    old = (isync.DEADMAN_S, isync.DEADMAN_TICK_S)
+    isync.DEADMAN_S, isync.DEADMAN_TICK_S = 0.3, 0.05
+    try:
+        task = asyncio.create_task(srv._watchdog())
+        # replicate _ws_handler's rule: only the driver refreshes _last_seen
+        for _ in range(14):
+            await asyncio.sleep(0.05)
+            ws = b
+            if ws is srv._driver or srv._driver is None:
+                srv._last_seen = time.monotonic()
+            await srv._route(b, {"type": "ping"})
+        assert not srv.player.manual_enabled, "a live spectator kept a silent driver's toy running"
+        task.cancel()
+    finally:
+        isync.DEADMAN_S, isync.DEADMAN_TICK_S = old
+    src = open(os.path.join(_HERE, "IntifaceSync.py"), encoding="utf-8").read()
+    assert "if ws is self._driver or self._driver is None:\n                    self._last_seen" in src, \
+        "_ws_handler no longer restricts the deadman to the driver"
+asyncio.run(_deadman_driver())
+print("   spectator pings do not feed the deadman  OK")
+
+print("51. a takeover swaps the script but keeps manual; connect does not rebuild a live link")
+async def _handoff():
+    srv, a, b = await _two_tabs()
+    await srv._route(a, {"type": "claim"})
+    srv.player.load([{"at": i * 300, "pos": i % 2 * 100} for i in range(60)])
+    await srv._route(a, {"type": "play", "time": 0})
+    await srv._route(a, {"type": "manual", "enabled": True, "level": 0.4, "shape": "wave"})
+    srv.bp.sent.clear()
+    await srv._route(b, {"type": "claim", "force": True})
+    assert srv._driver is b and srv.player.actions == [] and not srv.player.playing
+    assert srv.player.manual_enabled, "switching tabs must not end a manual session"
+    # without manual running, a takeover silences the old script's level
+    srv.player.set_manual(enabled=False); srv.bp.sent.clear()
+    srv.player.load([{"at": 0, "pos": 0}, {"at": 500, "pos": 100}])
+    await srv._route(a, {"type": "claim", "force": True})
+    await asyncio.sleep(0.05)
+    assert ("StopAllDevices", {}) in srv.bp.sent
+    # connect while connected: no rebuild unless forced
+    bp_before = srv.bp
+    srv.bp._ws = object(); srv.bp.__class__ = type("Up", (FakeBP,), {"connected": property(lambda self: True)})
+    await srv._route(a, {"type": "connect", "url": srv._intiface_url})
+    assert srv.bp is bp_before, "a takeover's connect rebuilt a live device link"
+asyncio.run(_handoff())
+print("   script unloaded, manual kept, idle output silenced, live link kept  OK")
+
+print("\nFORK 1.25 TESTS PASSED")
+
+print("52. a tab opened in the background only takes a device nobody drives")
+async def _bg_claim():
+    srv, a, b = await _two_tabs()
+    await srv._route(b, {"type": "claim", "ifFree": True})
+    assert srv._driver is b, "nobody drove, so a background tab may take it"
+    await srv._route(a, {"type": "claim", "ifFree": True})
+    assert srv._driver is b, "a background tab took an idle driver's device"
+    await srv._route(a, {"type": "claim"})
+    assert srv._driver is a, "a visible tab still takes an idle (not playing) device"
+asyncio.run(_bg_claim())
+print("   background claims wait, visible ones take an idle device  OK")
+
+
+# ── 53-56. 1.29 strict script matching, unload, tease start, safety notice ───
+print("53. a video only gets its own script, never another video's")
+_d2 = _tf.mkdtemp()
+try:
+    for n in ("Scene One.mp4", "Scene One.funscript", "Scene One 2.mp4", "Scene One 2.funscript",
+              "Scene Two.mp4", "Scene Two.funscript", "Scene Three.mp4",
+              "Solo.mp4", "Solo.vib.funscript", "Movie.mp4", "Movie [FunGen].funscript",
+              "Movie.roll.funscript", "Tracked Clip.mp4", "tracked_clip.funscript",
+              "Axis Only.mp4", "Axis Only.roll.funscript"):
+        with open(os.path.join(_d2, n), "w", encoding="utf-8") as f:
+            f.write('{"actions": [{"at": 0, "pos": 0}, {"at": 500, "pos": 90}]}' if n.endswith(".funscript") else "")
+    fs = lambda v: [os.path.basename(x) for x in isync.find_funscripts(os.path.join(_d2, v))[0]]
+    assert fs("Scene Three.mp4") == [], f"borrowed another video's script: {fs('Scene Three.mp4')}"
+    assert fs("Scene One.mp4") == ["Scene One.funscript"], fs("Scene One.mp4")
+    assert fs("Scene One 2.mp4") == ["Scene One 2.funscript"], "the longer-named video keeps its own"
+    assert fs("Solo.mp4") == ["Solo.vib.funscript"], "a lone vibe track is the script"
+    assert fs("Movie.mp4") == ["Movie [FunGen].funscript"], "a named variant counts, an axis file does not"
+    assert fs("Tracked Clip.mp4") == ["tracked_clip.funscript"], "FunGen-style names still match"
+    assert fs("Axis Only.mp4") == [], "an extra motion axis alone is not a main script"
+    print("   no-script video gets nothing, variants and vibe tracks match, neighbours do not  OK")
+finally:
+    _sh.rmtree(_d2, ignore_errors=True)
+
+print("54. a scene without a script drops the last one but keeps manual running")
+async def _unload_msg():
+    srv, a, b = await _two_tabs()
+    await srv._route(a, {"type": "claim"})
+    srv.player.load([{"at": i * 300, "pos": i % 2 * 100} for i in range(60)])
+    srv._current_script_path = "x/Scene One.funscript"
+    await srv._route(a, {"type": "manual", "enabled": True, "level": 0.5, "shape": "wave"})
+    await srv._route(a, {"type": "unloadScript"})
+    assert srv.player.actions == [] and srv._current_script_path is None
+    assert srv.player.manual_enabled, "unloading a script must not end a manual session"
+    await srv._route(b, {"type": "unloadScript"})          # not driving: ignored
+    assert srv._driver is a
+asyncio.run(_unload_msg())
+print("   script gone, manual still on, only the driver may unload  OK")
+
+print("55. tease builds from the starting buzz length, and a build change restarts it")
+async def _on_from():
+    p = isync.FunscriptPlayer(FakeBP([GUSH]))
+    p.set_manual(shape="tease", period=4.0, on_ms=1500, build=4, on_from_ms=200)
+    lens = []
+    for k in range(6):                       # sample the buzz length of each cycle
+        t0 = 500.0 + k * 4.0
+        on = [p._manual_shape_value(t0 + x / 100.0) for x in range(0, 390, 2)]
+        lens.append(round(sum(1 for v in on if v > 0) * 0.02, 2))
+    want = [0.2, 0.52, 0.86, 1.18, 1.5, 1.5]
+    assert all(abs(a - b) <= 0.05 for a, b in zip(lens, want)), f"buzz lengths {lens}"
+    p.set_manual(period=4.0)                                # unrelated change: keeps going
+    assert p._manual_started is not None
+    p.set_manual(on_from_ms=300)                            # build change: starts over
+    assert p._manual_started is None and p.manual_on_from_ms == 300
+    srv = isync.BackendServer()
+    await srv._handle(None, {"type": "manual", "onFromMs": 250})
+    assert srv._manual["on_from_ms"] == 250 and srv.player.manual_on_from_ms == 250
+asyncio.run(_on_from())
+print("   0.2 s growing to 1.5 s over 4 buzzes; tuning the build restarts it  OK")
+
+print("56. a safety stop tells the remaining tabs why")
+async def _panic_notice():
+    srv, a, b = await _two_tabs()
+    await srv._route(a, {"type": "claim"})
+    await srv._route(a, {"type": "manual", "enabled": True, "level": 0.5, "shape": "tease"})
+    b.out.clear()
+    await srv._client_gone(a)
+    ev = [m for m in b.out if m.get("type") == "event"]
+    assert ev and "closed" in ev[-1]["message"] and ev[-1].get("safety"), f"no notice: {b.out[-3:]}"
+    b.out.clear()
+    await srv._panic("idle test")                           # nothing was running: no notice
+    assert not [m for m in b.out if m.get("type") == "event"]
+asyncio.run(_panic_notice())
+print("   'Stopped for safety: the tab that was driving the toy closed'  OK")
+
+print("\nFORK 1.29 TESTS PASSED")
+
+print("57. status carries the backend version, and it matches the manifest")
+async def _version():
+    srv, a, b = await _two_tabs()
+    await srv._route(a, {"type": "status"})
+    st = a.last_status()
+    assert st.get("version") == isync.PLUGIN_VERSION, st.get("version")
+    import yaml as _yaml
+    man = _yaml.safe_load(open(os.path.join(_HERE, "IntifaceSync.yml"), encoding="utf-8"))
+    assert man["version"] == isync.PLUGIN_VERSION, "manifest and backend versions differ"
+asyncio.run(_version())
+print(f"   {isync.PLUGIN_VERSION} in status and manifest  OK")
+
+print("\nFORK 1.30 TESTS PASSED")
+
+
+# ── 58-59. 1.31 Stop Backend must only ever stop the backend ─────────────────
+import signal as _signal
+print("58. a PID is only the backend if its command line says so")
+cmdlines = {1: "/usr/bin/stash --nobrowser", 23: "/usr/bin/stash --nobrowser",
+            40: "python3 /root/.stash/plugins/IntifaceSync/IntifaceSync.py",
+            41: "ffmpeg -i x.mp4"}
+rc = lambda pid: cmdlines.get(pid)
+assert not isync.is_backend_pid(1, rc), "PID 1 is never the backend"
+assert not isync.is_backend_pid(os.getpid(), lambda p: "IntifaceSync.py"), "never ourselves"
+assert not isync.is_backend_pid(os.getppid(), lambda p: "IntifaceSync.py"), "never our parent (Stash)"
+assert not isync.is_backend_pid(23, rc), "Stash under a reused PID"
+assert not isync.is_backend_pid(99, rc), "unreadable means no"
+assert isync.is_backend_pid(40, rc)
+assert isync.find_backend_pids(rc, lambda _: ["1", "23", "40", "41", "self", "stat"]) == [40]
+print("   PID 1, self, parent, Stash and unknown PIDs refused; the backend found  OK")
+
+print("59. a stale lock naming Stash is ignored, not killed (the 'stop kills Stash' bug)")
+_lock_d = _tf.mkdtemp()
+_old_lock = isync.LOCK_FILE
+isync.LOCK_FILE = os.path.join(_lock_d, "intiface_sync.lock")
+try:
+    sent = []
+    def fake_kill(pid, sig):
+        if sig == 0:
+            raise ProcessLookupError      # gone as soon as it is asked
+        sent.append((pid, sig))
+    # after a container restart: the lock names PID 23, which is now Stash
+    open(isync.LOCK_FILE, "w").write("23")
+    pids = isync.stop_backend(fake_kill, rc, lambda _: ["1", "23", "41"])
+    assert sent == [] and pids == [], f"signalled a process that is not the backend: {sent}"
+    assert not os.path.exists(isync.LOCK_FILE), "stale lock should be cleared"
+    # a real backend, lock file or not, is stopped with SIGTERM (its handler panics)
+    pids = isync.stop_backend(fake_kill, rc, lambda _: ["1", "23", "40", "41"])
+    assert sent == [(40, _signal.SIGTERM)] and pids == [40], sent
+finally:
+    isync.LOCK_FILE = _old_lock
+    _sh.rmtree(_lock_d, ignore_errors=True)
+print("   Stash left alone and the lock cleared; the real backend gets SIGTERM  OK")
+
+print("\nFORK 1.31 TESTS PASSED")
+
+
+# ── 60. 1.33 dependencies install quietly into the plugin folder ─────────────
+print("60. a missing package installs with --target into the plugin folder, never system-wide")
+calls = []
+class _R:
+    def __init__(self, rc, err=""): self.returncode, self.stderr, self.stdout = rc, err, ""
+_have = {"present": object()}
+def _imp(name):
+    if name in _have: return _have[name]
+    raise ImportError(name)
+# already importable: pip is never run
+assert isync.ensure_package("present", "present", run=lambda *a, **k: calls.append(a), importer=_imp) is _have["present"]
+assert calls == [], "pip ran for a package that was already there"
+# missing: one quiet pip run with --target DEPS_DIR, no --break-system-packages
+def _run_ok(cmd, **kw):
+    calls.append(cmd)
+    _have["newpkg"] = object()
+    return _R(0)
+assert isync.ensure_package("newpkg", "newpkg", run=_run_ok, importer=_imp) is _have["newpkg"]
+cmd = calls[-1]
+assert "--target" in cmd and cmd[cmd.index("--target") + 1] == isync.DEPS_DIR, cmd
+assert "--break-system-packages" not in cmd and len(calls) == 1, calls
+assert isync.DEPS_DIR in sys.path, "the plugin folder's deps must be importable"
+# pip fails: ImportError carrying the reason, not a pile of pip output
+try:
+    isync.ensure_package("nope", "nope", run=lambda c, **k: _R(1, "x\nERROR: no network"), importer=_imp)
+    raise AssertionError("should have raised")
+except ImportError:
+    pass
+print("   present: no pip; missing: one --target install; failure: ImportError  OK")
+
+print("\nFORK 1.33 TESTS PASSED")
+
+
+
+# ── 61-65. 1.44 Goon mode 2: the beat shape, silence at ceiling 0, the echo ──
+async def _run_manual(p, bp, ms_total, tick_ms=10):
+    """Drive _manual_tick on a fake clock; returns [(t_ms, level)] of ScalarCmds."""
+    devs = bp.scalar_devices()
+    real = time.monotonic
+    t0 = real() + 1000.0
+    out = []
+    try:
+        for k in range(0, ms_total, tick_ms):
+            now = t0 + k / 1000.0
+            isync.time.monotonic = lambda now=now: now
+            n0 = len(bp.sent)
+            await p._manual_tick(devs)
+            for m, pl in bp.sent[n0:]:
+                if m == "ScalarCmd":
+                    out.append((k, pl["Scalars"][0]["Scalar"]))
+    finally:
+        isync.time.monotonic = real
+    return out
+
+def _worst_per_s(cmds):
+    ts = [t for t, _ in cmds]
+    return max((sum(1 for u in ts if a <= u < a + 1000) for a in ts), default=0)
+
+print("61. beat shape: Heartbeat is two short buzzes a beat, accents play at the peak")
+async def _beat_shape():
+    bp = FakeBP([GUSH]); p = isync.FunscriptPlayer(bp)
+    p.set_manual(enabled=True, level=1.0, ceiling=0.6, shape="beat", bpm=70, div=4, steps="xx..", on_ms=100, beat_low=1.0)
+    cmds = await _run_manual(p, bp, 3000)
+    ons = [t for t, lv in cmds if lv > 0]
+    step = 60000 / 70 / 4
+    want = [0, step, 4 * step, 5 * step]
+    assert len(ons) >= 4 and all(abs(a - b) <= 10 for a, b in zip(ons[:4], want)), ons[:6]
+    offs = [t for t, lv in cmds if lv == 0]
+    assert all(any(100 <= o - a <= 130 for o in offs) for a in ons), "every buzz at least 100 ms"
+    assert all(abs(lv - 0.6) < 1e-9 for t, lv in cmds if lv > 0), "x at beat_low 1.0 plays at the ceiling"
+    q = isync.FunscriptPlayer(FakeBP([GUSH]))
+    q.set_manual(shape="beat", bpm=60, div=1, steps="Xx", beat_low=0.5, on_ms=300)
+    vals = [q._manual_shape_value(500.0 + k + 0.1) for k in range(4)]
+    assert vals == [1.0, 0.5, 1.0, 0.5], vals
+    assert q._manual_shape_value(500.0 + 4 + 0.5) == 0.0, "silent after the buzz"
+    print(f"   hits at {ons[:4]} ms, accents 1.0 / x 0.5  OK")
+asyncio.run(_beat_shape())
+
+print("62. beat shape keeps the BLE budget whatever the steps ask (<= 4 hits/s, >= 90 ms apart)")
+async def _beat_budget():
+    worst_all = 0
+    for bpm, div, steps, drop in ((240, 4, "XXXX", 0.0), (240, 1, "x", 0.0), (200, 2, "x.xX", 0.0),
+                                  (150, 2, "xx.xxx.x", 0.25), (70, 4, "xx..", 0.0)):
+        bp = FakeBP([GUSH]); p = isync.FunscriptPlayer(bp)
+        p.set_manual(enabled=True, level=1.0, ceiling=0.8, shape="beat", bpm=bpm, div=div, steps=steps,
+                     on_ms=100, drop=drop)
+        cmds = await _run_manual(p, bp, 10000)
+        gaps = [y[0] - x[0] for x, y in zip(cmds, cmds[1:])]
+        hits = [t for t, lv in cmds if lv > 0]
+        hit_rate = max((sum(1 for u in hits if a <= u < a + 1000) for a in hits), default=0)
+        worst = _worst_per_s(cmds)
+        worst_all = max(worst_all, worst)
+        assert hit_rate <= isync.BEAT_MAX_HITS_PER_S, (bpm, div, steps, hit_rate)
+        assert worst <= 2 * isync.BEAT_MAX_HITS_PER_S < 11, (bpm, steps, worst)
+        assert min(gaps) >= isync.VIBE_MIN_INTERVAL_MS, (bpm, steps, min(gaps))
+    # pads mashed: a new beat every 300 ms (each one a restart) still keeps the cap
+    bp = FakeBP([GUSH]); p = isync.FunscriptPlayer(bp)
+    p.set_manual(enabled=True, level=1.0, ceiling=0.8, shape="beat", bpm=240, div=1, steps="X", on_ms=100)
+    devs = bp.scalar_devices(); real = time.monotonic; t0 = real() + 2000.0; hits = []
+    try:
+        for k in range(0, 6000, 10):
+            if k % 300 == 0:
+                p.set_manual(steps="X" if (k // 300) % 2 else "x", beat_low=0.9)
+            isync.time.monotonic = lambda k=k: t0 + k / 1000.0
+            n0 = len(bp.sent)
+            await p._manual_tick(devs)
+            hits += [k for m, pl in bp.sent[n0:] if m == "ScalarCmd" and pl["Scalars"][0]["Scalar"] > 0]
+    finally:
+        isync.time.monotonic = real
+    starts = [h for i, h in enumerate(hits) if i == 0 or h - hits[i - 1] > 150]
+    assert max(sum(1 for u in starts if a <= u < a + 1000) for a in starts) <= isync.BEAT_MAX_HITS_PER_S, starts[:12]
+    # the dropout is decided once per step, so a step sampled twice agrees
+    q = isync.FunscriptPlayer(FakeBP([GUSH]))
+    q.set_manual(shape="beat", bpm=150, div=2, steps="xxxxxxxx", drop=0.5, on_ms=100)
+    a = [q._manual_shape_value(900.0 + k * 0.2 + 0.01) for k in range(20)]
+    assert 0 < sum(1 for v in a if v > 0) < 20, "some hits left out, not all"
+    print(f"   worst {worst_all} commands in any second (16 hits/s asked), gaps >= {isync.VIBE_MIN_INTERVAL_MS} ms  OK")
+asyncio.run(_beat_budget())
+
+print("63. a ceiling of 0 is silence, never micro pulsing; the beat fields reach the player")
+async def _ceil_zero():
+    bp = FakeBP([GUSH]); p = isync.FunscriptPlayer(bp)
+    p.apply_settings(vibe_substep=True)
+    p.set_manual(enabled=True, level=1.0, ceiling=0.3, shape="constant")
+    cmds = await _run_manual(p, bp, 300)
+    assert cmds and cmds[-1][1] > 0, "playing first"
+    p.set_manual(ceiling=0.0)
+    assert p.manual_ceiling == 0.0 and p.manual_enabled, "0 is kept, manual stays on (not a stop)"
+    cmds = await _run_manual(p, bp, 3000)
+    assert len(cmds) == 1 and cmds[0][1] == 0.0, f"one off, then quiet: {cmds[:5]}"
+    p.set_manual(ceiling=-1)
+    assert p.manual_ceiling == 0.0
+    srv = isync.BackendServer()
+    srv.bp = FakeBP([GUSH]); srv.player = isync.FunscriptPlayer(srv.bp)
+    await srv._handle(None, {"type": "manual", "shape": "beat", "bpm": 999, "div": 9, "steps": "xQ.X!",
+                             "beatLow": 0.1, "swing": 2, "drop": 0.9, "ceiling": 0})
+    pl = srv.player
+    assert pl.manual_shape == "beat" and pl.manual_bpm == isync.BEAT_SHAPE_MAX_BPM and pl.manual_div == 4
+    assert pl.manual_steps == "x.X" and pl.manual_beat_low == 0.3 and pl.manual_swing == 0.4 and pl.manual_drop == 0.6
+    assert pl.manual_ceiling == 0.0 and srv._manual["steps"] == "x.X", "app-level copy survives a reconnect"
+    assert not pl.manual_enabled, "a pattern message never switches manual on"
+    print("   ceiling 0: one off command, then nothing; fields clamped and cleaned  OK")
+asyncio.run(_ceil_zero())
+
+print("64. a new beat starts on its first step; manual off still stops the device")
+async def _beat_restart():
+    bp = FakeBP([GUSH]); p = isync.FunscriptPlayer(bp)
+    p.set_manual(enabled=True, shape="beat", bpm=110, div=1, steps="x")
+    p._manual_shape_value(50.0)
+    assert p._manual_started is not None
+    p.set_manual(on_ms=200)                          # a timing tweak keeps going
+    assert p._manual_started is not None
+    p.set_manual(steps="xX")                         # a new beat starts over
+    assert p._manual_started is None
+    p._manual_shape_value(60.0)
+    p.set_manual(bpm=150)
+    assert p._manual_started is None
+    bp.sent.clear()
+    p.set_manual(enabled=False)
+    await asyncio.sleep(0)
+    assert ("StopAllDevices", {}) in bp.sent, "manual off must still stop"
+    print("   steps / bpm restart it, on_ms does not; manual off stops  OK")
+asyncio.run(_beat_restart())
+
+print("65. the echo: off by default, at most 4 a second, only to the tab that asked")
+async def _echo():
+    srv, a, b = await _two_tabs()
+    await srv._route(a, {"type": "claim"})
+    assert srv.player.echo_cb is None, "off until a tab asks"
+    await srv._route(a, {"type": "manual", "enabled": True, "level": 1.0, "shape": "pulse", "period": 0.25,
+                         "onMs": 120, "ceiling": 0.5})
+    await srv._route(a, {"type": "echo", "enabled": True})
+    assert srv.player.echo_cb is not None and srv._echo_ws is a
+    a.out.clear(); b.out.clear()
+    await _run_manual(srv.player, srv.bp, 4000)
+    await asyncio.sleep(0)
+    ev = [m for m in a.out if m.get("type") == "echo"]
+    assert 12 <= len(ev) <= 17, f"{len(ev)} echoes in 4 s"
+    assert all(0.0 <= m["lv"] <= 1.0 for m in ev) and max(m["lv"] for m in ev) == 0.5, ev[:3]
+    assert sum(m["n"] for m in ev) > 0 and not [m for m in b.out if m.get("type") == "echo"], "only the asking tab"
+    await srv._route(b, {"type": "echo", "enabled": False})      # another tab cannot turn off a's
+    assert srv._echo_ws is a
+    await srv._route(a, {"type": "echo", "enabled": False})
+    assert srv.player.echo_cb is None and srv._echo_ws is None
+    await srv._route(a, {"type": "echo", "enabled": True})
+    await srv._client_gone(a)
+    assert srv.player.echo_cb is None and srv._echo_ws is None, "a closed tab ends its echo"
+    assert not srv.player.manual_enabled, "and the driver closing still panics as before"
+    print(f"   {len(ev)} echoes in 4 s, max level 0.5; off, other tab, closed tab  OK")
+asyncio.run(_echo())
+
+print("\nFORK 1.44 TESTS PASSED")
+
+
+# ── 66. 1.45 Stop (halt): _panic() from any tab, the Intiface link kept ──────
+print("66. halt stops script, manual and the device through _panic, from any tab, link kept")
+async def _halt():
+    srv, a, b = await _two_tabs()
+    disc = []
+    async def _no_disconnect():
+        disc.append(1)
+    srv.bp.disconnect = _no_disconnect
+    await srv._route(a, {"type": "claim"})
+    srv.player.load([{"at": i * 300, "pos": i % 2 * 100} for i in range(60)])
+    await srv._route(a, {"type": "play", "time": 0})
+    await srv._route(a, {"type": "manual", "enabled": True, "level": 0.6, "shape": "tease"})
+    calls = []
+    real = srv._panic
+    async def _spy(reason, announce=True):
+        calls.append((reason, announce))
+        await real(reason, announce)
+    srv._panic = _spy
+    srv.bp.sent.clear(); a.out.clear(); b.out.clear()
+    # the driver's Stop
+    await srv._route(a, {"type": "halt"})
+    await asyncio.sleep(0.05)
+    assert calls and calls[-1][1] is False, f"halt must go through _panic: {calls}"
+    assert not srv._manual["enabled"] and not srv.player.manual_enabled, "manual left armed"
+    assert not srv.player.playing, "the script kept playing"
+    assert ("StopAllDevices", {}) in srv.bp.sent, f"no StopAllDevices: {srv.bp.sent}"
+    assert not disc, "halt must keep the Intiface link (that is Disconnect's job)"
+    assert srv._driver is a and srv.player.actions, "the script stays loaded for the next play"
+    assert srv._output is True, "halt is not mute: the next play is heard"
+    assert not [m for m in b.out if m.get("type") == "event"], "a Stop the user pressed is not a safety notice"
+    assert b.last_status()["manual"] is False, "the other tabs learn manual is off"
+    # a later manual message without enabled (a slider nudge) cannot re-arm it
+    await srv._route(a, {"type": "manual", "level": 0.9})
+    assert not srv.player.manual_enabled, "a nudge re-armed manual after Stop"
+    # the next play resumes the script
+    await srv._route(a, {"type": "play", "time": 3000})
+    assert srv.player.playing
+    # a spectator's Stop works too, and does not take the device
+    await srv._route(a, {"type": "manual", "enabled": True, "level": 0.5, "shape": "wave"})
+    srv.bp.sent.clear()
+    await srv._route(b, {"type": "halt"})
+    await asyncio.sleep(0.05)
+    assert not srv.player.manual_enabled and not srv.player.playing and ("StopAllDevices", {}) in srv.bp.sent
+    assert srv._driver is a and not disc, "a spectator's Stop must not take over or disconnect"
+    src = open(os.path.join(_HERE, "IntifaceSync.py"), encoding="utf-8").read()
+    i = src.index('if t == "halt":\n            await self._panic(')
+    assert "disconnect" not in src[i:i + 300], "the halt handler must not disconnect"
+asyncio.run(_halt())
+print("   _panic (no safety notice), manual and script stopped, link kept, any tab, next play resumes  OK")
+
+print("\nFORK 1.45 TESTS PASSED")
+
+
+
+# ── 67-72. 1.47 the buzz shape: Goon mode's buzzes with true silence between ──
+# The user's Gush 2 test of Goon mode 2: "it is constantly vibrating". Goon now
+# plays this shape (and pulse / beat): short buzzes, 0 between them, each with
+# its own seeded length, strength and gap.
+def _buzz_player(**kw):
+    bp = FakeBP([GUSH]); p = isync.FunscriptPlayer(bp)
+    args = dict(enabled=True, level=1.0, ceiling=0.5, shape="buzz", seed=7, on_from_ms=100, on_ms=280,
+                gap_ms=2000, vary_amp=0.3, vary_gap=0.8, taps=0.15, longs=0.1)
+    args.update(kw)
+    p.set_manual(**args)
+    return bp, p
+
+def _segments(cmds, end_ms):
+    """[(on_ms, off_ms, level)] from a command list that starts silent."""
+    segs, on = [], None
+    for t, lv in cmds:
+        if lv > 0 and on is None:
+            on = (t, lv)
+        elif lv == 0 and on is not None:
+            segs.append((on[0], t, on[1])); on = None
+    if on is not None:
+        segs.append((on[0], end_ms, on[1]))
+    return segs
+
+print("67. buzz shape: off between buzzes, buzzes 100 ms or longer, strength within its bounds")
+async def _buzz_shape():
+    # the user's Build up timing (80 -> 280 ms buzzes; 80 is held to 100) with variety
+    bp, p = _buzz_player(on_from_ms=80, on_ms=280, gap_ms=1200, ceiling=0.6, vary_amp=0.3)
+    cmds = await _run_manual(p, bp, 60000)
+    segs = _segments(cmds, 60000)
+    assert len(segs) >= 20, len(segs)
+    offs = sum(1 for t, lv in cmds if lv == 0)
+    assert offs >= len(segs) - 1, "an off command at each buzz end"
+    lens = [b - a for a, b, _ in segs[:-1]]
+    gaps = [segs[i + 1][0] - segs[i][1] for i in range(len(segs) - 1)]
+    assert min(lens) >= isync.BUZZ_MIN_ON_MS and max(lens) <= 280 + 20, (min(lens), max(lens))
+    assert min(gaps) >= isync.BUZZ_MIN_GAP_MS, f"silence between buzzes: {min(gaps)} ms"
+    lv = [x for _, _, x in segs]
+    assert all(0.6 * 0.7 - 0.05 - 1e-9 <= x <= 0.6 + 1e-9 for x in lv), lv[:10]
+    assert len(set(lv)) >= 2 and len(set(lens)) >= 5, "strength and length vary from buzz to buzz"
+    # nothing in a gap: every non-zero command lies inside a buzz
+    assert all(lv2 == 0 or any(a <= t < b for a, b, _ in segs) for t, lv2 in cmds), "output between buzzes"
+    # it is a gate shape: no smoothing, and a peak under one motor step plays short buzzes at the floor
+    assert p._manual_is_gate()
+    bp2, q = _buzz_player(ceiling=0.03)
+    q.apply_settings(vibe_substep=True)
+    c2 = await _run_manual(q, bp2, 10000)
+    assert c2 and all(lv in (0.0, 0.05) for _, lv in c2), c2[:6]
+    print(f"   {len(segs)} buzzes in 60 s, {min(lens)}-{max(lens)} ms, silence >= {min(gaps)} ms, levels {sorted(set(lv))[:4]}  OK")
+asyncio.run(_buzz_shape())
+
+print("68. buzz shape keeps the BLE budget: <= 4 buzzes and <= 8 commands a second, >= 90 ms apart; <= 11 with strength messages")
+async def _buzz_budget():
+    worst_cmd = worst_buzz = 0
+    cases = (dict(on_from_ms=100, on_ms=100, gap_ms=150, taps=0.5, vary_gap=1.0, longs=0.0),     # the tightest it can be asked
+             dict(on_from_ms=100, on_ms=100, gap_ms=200, taps=0.0, vary_gap=0.0),                # 200 BPM (one per 300 ms)
+             dict(on_from_ms=60, on_ms=60, gap_ms=10, taps=0.5),                                  # below the minimums: clamped
+             dict(on_from_ms=180, on_ms=840, gap_ms=330, vary_amp=0.1, vary_gap=0.4),             # an Edge
+             dict(on_from_ms=100, on_ms=2600, gap_ms=150, vary_gap=1.0))                          # long buzzes: never solid
+    for kw in cases:
+        bp, p = _buzz_player(ceiling=0.8, **kw)
+        cmds = await _run_manual(p, bp, 20000)
+        segs = _segments(cmds, 20000)
+        starts = [a for a, _, _ in segs]
+        per_s = max(sum(1 for u in starts if a <= u < a + 1000) for a in starts)
+        gaps = [y[0] - x[0] for x, y in zip(cmds, cmds[1:])]
+        lens = [b - a for a, b, _ in segs[:-1]]
+        sil = [segs[i + 1][0] - segs[i][1] for i in range(len(segs) - 1)]
+        worst_buzz = max(worst_buzz, per_s); worst_cmd = max(worst_cmd, _worst_per_s(cmds))
+        assert per_s <= isync.BUZZ_MAX_PER_S, (kw, per_s)
+        assert _worst_per_s(cmds) <= 2 * isync.BUZZ_MAX_PER_S, (kw, _worst_per_s(cmds))
+        assert min(gaps) >= isync.VIBE_MIN_INTERVAL_MS, (kw, min(gaps))
+        assert min(lens) >= isync.BUZZ_MIN_ON_MS and max(lens) <= isync.BUZZ_MAX_ON_MS + 20, (kw, min(lens), max(lens))
+        assert min(sil) >= isync.BUZZ_MIN_GAP_MS, (kw, min(sil))
+    # strength messages every 500 ms (up and down, as Goon sends them) on a
+    # tight train: a rise waits for the next buzz, a fall is one command
+    bp, p = _buzz_player(ceiling=0.8, on_from_ms=100, on_ms=400, gap_ms=150, taps=0.5, vary_gap=1.0)
+    devs = bp.scalar_devices(); real = time.monotonic; t0 = real() + 3000.0; cmds = []
+    try:
+        for k in range(0, 20000, 10):
+            if k % 500 == 0:
+                p.set_manual(ceiling=0.8 if (k // 500) % 2 else 0.4)
+            isync.time.monotonic = lambda k=k: t0 + k / 1000.0
+            n0 = len(bp.sent)
+            await p._manual_tick(devs)
+            cmds += [(k, pl["Scalars"][0]["Scalar"]) for m, pl in bp.sent[n0:] if m == "ScalarCmd"]
+    finally:
+        isync.time.monotonic = real
+    assert _worst_per_s(cmds) <= 11, _worst_per_s(cmds)
+    assert all(lv <= 0.8 + 1e-9 for _, lv in cmds)
+    rises = [(x, y) for x, y in zip(cmds, cmds[1:]) if x[1] > 0 and y[1] > x[1]]
+    assert not rises, f"a buzz got stronger mid-buzz: {rises[:3]}"
+    print(f"   worst {worst_buzz} buzzes and {worst_cmd} commands in any second; {_worst_per_s(cmds)} with strength messages  OK")
+asyncio.run(_buzz_budget())
+
+print("69. buzz randomness is seeded and bounded: same seed same train, gaps 0.6-2.5x, taps and longer silences")
+async def _buzz_seeded():
+    def train(seed, tick, n=400, **kw):
+        q = isync.FunscriptPlayer(FakeBP([GUSH]))
+        args = dict(shape="buzz", seed=seed, on_from_ms=100, on_ms=600, gap_ms=1000, vary_amp=0.4,
+                    vary_gap=1.0, taps=0.2, longs=0.1)
+        args.update(kw)
+        q.set_manual(**args)
+        out, t, last = [], 500.0, None
+        while len(out) < n:
+            q._manual_shape_value(t)
+            c = q._buzz_cur
+            if c is not None and c is not last:
+                out.append((round(c["end"] - c["start"], 6), round(c["v"], 6), round(q._buzz_next - c["end"], 6)))
+                last = c
+            t += tick
+        return out
+    a, b, c = train(11, 0.010), train(11, 0.007), train(12, 0.010)
+    assert [x[:2] for x in a] == [x[:2] for x in b], "the same seed gives the same buzzes at any tick rate"
+    assert [x[:2] for x in a] != [x[:2] for x in c], "another seed, another train"
+    lens = [x[0] for x in a]; amps = [x[1] for x in a]; gaps = [x[2] for x in a]
+    assert 0.1 - 1e-9 <= min(lens) and max(lens) <= 0.6 + 1e-9 and max(lens) - min(lens) > 0.3
+    assert 0.6 - 1e-9 <= min(amps) and max(amps) <= 1.0 + 1e-9 and max(amps) - min(amps) > 0.25
+    taps = [g for g in gaps if g <= 0.24 + 1e-9]
+    longs = [g for g in gaps if g >= 2.5 - 1e-9]
+    normal = [g for g in gaps if 0.24 + 1e-9 < g < 2.5 - 1e-9]
+    assert all(0.15 - 1e-9 <= g for g in taps) and all(g <= 4.0 + 1e-9 for g in longs)
+    assert all(0.6 - 1e-9 <= g <= 2.5 + 1e-9 for g in normal), (min(normal), max(normal))
+    assert 0.15 * len(gaps) <= len(taps) <= 0.5 * len(gaps), len(taps)     # taps 20%: doubles and triples
+    assert 0.04 * len(gaps) <= len(longs) <= 0.2 * len(gaps), len(longs)
+    # no variety asked: every buzz the same, every gap the base gap
+    d = train(5, 0.01, n=30, vary_amp=0.0, vary_gap=0.0, taps=0.0, longs=0.0, on_from_ms=250, on_ms=250)
+    assert len(set(x[:2] for x in d)) == 1 and all(abs(x[2] - 1.0) < 1e-9 for x in d)
+    print(f"   400 buzzes: {min(lens):.2f}-{max(lens):.2f} s, strength {min(amps):.2f}-1, {len(taps)} tap gaps, {len(longs)} long silences  OK")
+asyncio.run(_buzz_seeded())
+
+print("70. a buzz stops at once on halt, the deadman and the driver leaving (all _panic); ceiling 0 is silence, not a stop")
+async def _buzz_stops():
+    async def mid_buzz():
+        srv, a, b = await _two_tabs()
+        await srv._route(a, {"type": "claim"})
+        await srv._route(a, {"type": "manual", "enabled": True, "level": 1.0, "shape": "buzz", "onFromMs": 900,
+                             "onMs": 1500, "gapMs": 2000, "seed": 3, "ceiling": 0.6})
+        cmds = await _run_manual(srv.player, srv.bp, 300)
+        assert cmds and cmds[-1][1] > 0 and srv.player._buzz_cur is not None, "sounding"
+        calls = []
+        real = srv._panic
+        async def _spy(reason, announce=True):
+            calls.append(reason)
+            await real(reason, announce)
+        srv._panic = _spy
+        srv.bp.sent.clear()
+        return srv, a, b, calls
+    srv, a, b, calls = await mid_buzz()
+    await srv._route(a, {"type": "halt"})
+    await asyncio.sleep(0.01)
+    assert calls and ("StopAllDevices", {}) in srv.bp.sent, "halt mid-buzz: _panic and StopAllDevices at once"
+    assert not srv.player.manual_enabled and srv.player._buzz_cur is None, "the buzz is gone, manual off"
+    # a pattern message afterwards cannot bring the buzz back
+    await srv._route(a, {"type": "manual", "shape": "buzz", "seed": 9, "ceiling": 0.6})
+    assert not srv.player.manual_enabled
+    srv, a, b, calls = await mid_buzz()
+    await srv._client_gone(a)
+    await asyncio.sleep(0.01)
+    assert calls and ("StopAllDevices", {}) in srv.bp.sent and not srv.player.manual_enabled, "the driver closing mid-buzz"
+    srv, a, b, calls = await mid_buzz()
+    old = (isync.DEADMAN_S, isync.DEADMAN_TICK_S)
+    isync.DEADMAN_S, isync.DEADMAN_TICK_S = 0.2, 0.05
+    try:
+        srv._last_seen = time.monotonic() - 5
+        task = asyncio.create_task(srv._watchdog())
+        await asyncio.sleep(0.2)
+        task.cancel()
+    finally:
+        isync.DEADMAN_S, isync.DEADMAN_TICK_S = old
+    assert calls and ("StopAllDevices", {}) in srv.bp.sent and not srv.player.manual_enabled, "the deadman mid-buzz"
+    # ceiling 0 mid-buzz: off at once, Manual stays on (pauses are silence)
+    bp, p = _buzz_player(on_from_ms=900, on_ms=1500, ceiling=0.6)
+    c1 = await _run_manual(p, bp, 300)
+    assert c1[-1][1] > 0
+    p.set_manual(ceiling=0.0)
+    c2 = await _run_manual(p, bp, 5000)
+    assert c2 and c2[0][1] == 0.0 and all(lv == 0.0 for _, lv in c2) and len(c2) == 1, c2[:4]
+    assert p.manual_enabled, "0 is a normal output level, not a stop"
+    src = open(os.path.join(_HERE, "IntifaceSync.py"), encoding="utf-8").read()
+    i = src.index("def _manual_buzz_value(")
+    body = src[i:src.index("\n    def ", i + 10)]
+    assert "stop_all" not in body and "_panic" not in body and "manual_enabled" not in body, "the shape is no stop path of its own"
+    print("   halt, the deadman and the driver leaving stop a buzz through _panic; ceiling 0 is one off command  OK")
+asyncio.run(_buzz_stops())
+
+print("71. buzz fields reach the player clamped; a new seed restarts it with a silence; never above the peak, floor while it sounds")
+async def _buzz_fields():
+    srv = isync.BackendServer()
+    srv.bp = FakeBP([GUSH]); srv.player = isync.FunscriptPlayer(srv.bp)
+    await srv._handle(None, {"type": "manual", "shape": "buzz", "gapMs": 5, "varyAmp": 3, "varyGap": -1, "taps": 9,
+                             "longs": 2, "seed": -4, "minLevel": 7, "onMs": 280, "onFromMs": 80})
+    pl = srv.player
+    assert pl.manual_shape == "buzz" and pl.manual_gap_ms == isync.BUZZ_MIN_GAP_MS and pl.manual_vary_amp == 0.6
+    assert pl.manual_vary_gap == 0.0 and pl.manual_taps == 0.5 and pl.manual_longs == 0.4 and pl.manual_min_level == 1.0
+    assert 0 <= pl.manual_seed < (1 << 31) and srv._manual["gap_ms"] == isync.BUZZ_MIN_GAP_MS, "app-level copy kept for a reconnect"
+    assert not pl.manual_enabled, "a pattern message never switches manual on"
+    # a tweak keeps the train going; a new seed restarts it, after a silence
+    bp, p = _buzz_player(on_from_ms=600, on_ms=600, gap_ms=3000, vary_gap=0.0, taps=0.0, longs=0.0)
+    p._manual_shape_value(100.0)
+    assert p._manual_started is not None and p._buzz_cur is not None
+    p.set_manual(gap_ms=2500, vary_amp=0.2, on_ms=500, ceiling=0.4)
+    assert p._manual_started is not None, "a tweak does not restart"
+    p._manual_shape_value(100.05)
+    p.set_manual(seed=8)
+    assert p._manual_started is None
+    v = p._manual_shape_value(100.06)
+    assert v > 0 and abs(p._buzz_cur["end"] - (100.0 + isync.BUZZ_MIN_ON_MS / 1000.0)) < 1e-9, "the sounding buzz is cut to its minimum"
+    assert p._manual_shape_value(100.12) == 0.0
+    nxt = p._buzz_next
+    assert nxt >= 100.1 + isync.BUZZ_MIN_GAP_MS / 1000.0 - 1e-9, "the new train waits a short silence"
+    assert p._manual_shape_value(nxt + 0.001) > 0, "then it starts"
+    # strength: never above the peak, at least min_level while sounding
+    bp, p = _buzz_player(ceiling=0.3, vary_amp=0.6, min_level=0.2)
+    cmds = await _run_manual(p, bp, 30000)
+    on = [lv for _, lv in cmds if lv > 0]
+    assert on and max(on) <= 0.3 + 1e-9 and min(on) >= 0.2 - 1e-9, (min(on), max(on))
+    bp, p = _buzz_player(ceiling=0.1, min_level=0.4)
+    on = [lv for _, lv in await _run_manual(p, bp, 10000) if lv > 0]
+    assert on and max(on) <= 0.1 + 1e-9, "the floor never lifts a buzz above the peak (the Power limit)"
+    bp.sent.clear(); p.set_manual(enabled=False); await asyncio.sleep(0)
+    assert ("StopAllDevices", {}) in bp.sent, "manual off still stops"
+    print("   clamped, kept for reconnects; tweak goes on, a seed restarts after >= 150 ms off; peak and floor kept  OK")
+asyncio.run(_buzz_fields())
+
+print("72. the echo carries each command (ms ago, level), so the graph draws the real buzzes")
+async def _buzz_echo():
+    srv, a, b = await _two_tabs()
+    await srv._route(a, {"type": "claim"})
+    await srv._route(a, {"type": "manual", "enabled": True, "level": 1.0, "shape": "buzz", "onFromMs": 200,
+                         "onMs": 200, "gapMs": 400, "varyGap": 0, "seed": 2, "ceiling": 0.5})
+    await srv._route(a, {"type": "echo", "enabled": True})
+    a.out.clear()
+    cmds = await _run_manual(srv.player, srv.bp, 4000)
+    await asyncio.sleep(0)
+    ev = [m for m in a.out if m.get("type") == "echo"]
+    got = [x for m in ev for x in m.get("c", [])]
+    assert ev and all(isinstance(m.get("c"), list) for m in ev)
+    assert abs(len(got) - len(cmds)) <= 2 and all(0 <= ms <= 300 and 0.0 <= lv <= 1.0 for ms, lv in got), (len(got), len(cmds), got[:4])
+    assert {lv for _, lv in got} == {0.0, 0.5}, "on at the strength, off between"
+    print(f"   {len(got)} commands echoed in {len(ev)} messages  OK")
+asyncio.run(_buzz_echo())
+
+print("\nFORK 1.47 TESTS PASSED")
+
+
+
+# ── 73-75. 1.49 Tidal: phrases, accents, holds and a breathing tide ──────────
+# A richer base pattern than the user's Build up (one buzz every 6 s): phrases
+# of 2-5 buzzes, 100-700 ms, accents, now and then a 0.8-1.2 s hold at a
+# phrase's end and a 6-12 s silence, the density rising and falling over 40 s.
+# Still the buzz shape: 0 between buzzes, the same budget.
+TIDAL = dict(shape="buzz", on_from_ms=100, on_ms=700, gap_ms=2900, vary_amp=0.35, vary_gap=0.6, taps=0.0,
+             longs=0.12, phrase_min=2, phrase_max=5, accent=0.25, hold_chance=0.2, breath_s=40)
+
+def _tidal_train(seed, tick, secs=600.0, **kw):
+    q = isync.FunscriptPlayer(FakeBP([GUSH]))
+    args = dict(TIDAL, seed=seed)
+    args.update(kw)
+    q.set_manual(**args)
+    out, t, last, t0 = [], 500.0, None, 500.0
+    while t < t0 + secs:
+        q._manual_shape_value(t)
+        c = q._buzz_cur
+        if c is not None and c is not last:
+            out.append({"a": c["start"] - t0, "len": c["end"] - c["start"], "v": c["v"], "gap": q._buzz_next - c["end"]})
+            last = c
+        t += tick
+    return out
+
+print("73. Tidal: phrases of 2-5 buzzes, 100-700 ms (holds 0.8-1.2 s), inner silences 180-420 ms, long silences, seeded")
+async def _tidal_bounds():
+    a = _tidal_train(21, 0.010)
+    b = _tidal_train(21, 0.007)
+    c = _tidal_train(22, 0.010)
+    key = lambda tr: [(round(x["len"], 6), round(x["v"], 6)) for x in tr[:150]]
+    assert key(a) == key(b), "the same seed gives the same buzzes at any tick rate"
+    assert key(a) != key(c), "another seed, another train"
+    lens = [x["len"] for x in a]
+    holds = [x for x in a if x["len"] > 0.7 + 1e-6]
+    plain = [x for x in a if x["len"] <= 0.7 + 1e-6]
+    assert min(lens) >= isync.BUZZ_MIN_ON_MS / 1000 - 1e-9 and max(lens) <= 1.2 + 1e-9, (min(lens), max(lens))
+    assert all(0.8 - 1e-9 <= x["len"] <= 1.2 + 1e-9 for x in holds), "a long buzz is a 0.8-1.2 s hold"
+    assert max(x["len"] for x in plain) - min(x["len"] for x in plain) > 0.4, "lengths vary across the range"
+    # phrases: split at the silences longer than an inner one
+    inner_hi = isync.BUZZ_INNER_GAP_MS[1] / 1000 + 1e-9
+    phrases, cur = [], []
+    for x in a:
+        cur.append(x)
+        if x["gap"] > inner_hi:
+            phrases.append(cur); cur = []
+    sizes = [len(p) for p in phrases]
+    assert min(sizes) >= 2 and max(sizes) <= 5, (min(sizes), max(sizes))
+    assert len(set(sizes)) >= 3, f"phrase lengths vary: {sorted(set(sizes))}"
+    inner = [x["gap"] for p in phrases for x in p[:-1]]
+    assert all(0.18 - 1e-9 <= g <= 0.42 + 1e-9 for g in inner), (min(inner), max(inner))
+    assert all(len(p) >= 1 and all(y["len"] <= 0.7 + 1e-6 for y in p[:-1]) for p in phrases), "a hold only ends a phrase"
+    between = [p[-1]["gap"] for p in phrases]
+    longs = [g for g in between if g >= 6.0]
+    assert longs and max(between) <= isync.BUZZ_LONG_MAX_MS / 1000 + 1e-9, (len(longs), max(between))
+    assert min(between) >= isync.BUZZ_MIN_GAP_MS / 1000 - 1e-9
+    # accents at full strength; the rest softer, never under (1 - 0.35) x 0.8 of the peak
+    vs = [x["v"] for x in a]
+    assert any(abs(v - 1.0) < 1e-9 for v in vs) and min(vs) >= (1 - 0.35) * (1 - isync.BUZZ_TIDE_AMP) - 1e-9, min(vs)
+    assert len(holds) >= 5, f"holds now and then: {len(holds)} in {len(phrases)} phrases"
+    print(f"   {len(a)} buzzes in {len(phrases)} phrases of {min(sizes)}-{max(sizes)}, {len(holds)} holds, "
+          f"{len(longs)} silences of 6 s or more (longest {max(between):.1f} s)  OK")
+asyncio.run(_tidal_bounds())
+
+print("74. Tidal keeps the BLE budget (<= 4 starts and <= 8 commands a second, >= 90 ms apart) and breathes")
+async def _tidal_budget():
+    worst = 0
+    for kw in (dict(), dict(on_from_ms=60, on_ms=100, gap_ms=10, phrase_min=6, phrase_max=6, longs=0.0),   # the tightest it can be asked
+               dict(on_from_ms=100, on_ms=2600, hold_chance=0.3, accent=0.5, breath_s=5)):              # long buzzes, clamped fields
+        bp, p = _buzz_player(ceiling=0.8, **{**TIDAL, **kw})
+        cmds = await _run_manual(p, bp, 30000)
+        segs = _segments(cmds, 30000)
+        starts = [s0 for s0, _, _ in segs]
+        per_s = max(sum(1 for u in starts if s0 <= u < s0 + 1000) for s0 in starts)
+        gaps = [y[0] - x[0] for x, y in zip(cmds, cmds[1:])]
+        sil = [segs[i + 1][0] - segs[i][1] for i in range(len(segs) - 1)]
+        lens = [e - s0 for s0, e, _ in segs[:-1]]
+        assert per_s <= isync.BUZZ_MAX_PER_S, (kw, per_s)
+        assert _worst_per_s(cmds) <= 2 * isync.BUZZ_MAX_PER_S, (kw, _worst_per_s(cmds))
+        assert min(gaps) >= isync.VIBE_MIN_INTERVAL_MS, (kw, min(gaps))
+        assert min(sil) >= isync.BUZZ_MIN_GAP_MS and min(lens) >= isync.BUZZ_MIN_ON_MS and max(lens) <= isync.BUZZ_MAX_ON_MS + 20, (kw, min(sil), min(lens), max(lens))
+        assert all(lv2 == 0 or any(s0 <= t < e for s0, e, _ in segs) for t, lv2 in cmds), "output between buzzes"
+        worst = max(worst, _worst_per_s(cmds))
+    # breathing: more buzzes a minute around high tide (20 s into each 40 s) than around low tide
+    tr = _tidal_train(5, 0.01, secs=1200.0, longs=0.0, hold_chance=0.0)
+    hi = sum(1 for x in tr if 10 <= x["a"] % 40 < 30)
+    lo = len(tr) - hi
+    assert hi > 1.4 * lo, f"high tide {hi} buzzes, low tide {lo}"
+    # the fields arrive from the page clamped, kept for a reconnect, and never switch manual on
+    srv = isync.BackendServer()
+    srv.bp = FakeBP([GUSH]); srv.player = isync.FunscriptPlayer(srv.bp)
+    await srv._handle(None, {"type": "manual", "shape": "buzz", "phraseMin": 9, "phraseMax": 2, "accent": 3, "holdChance": -1,
+                             "breathS": 4, "seed": 5})
+    pl = srv.player
+    assert pl.manual_phrase_min == isync.BUZZ_PHRASE_MAX and pl.manual_phrase_max == isync.BUZZ_PHRASE_MAX, "max never under min"
+    assert pl.manual_accent == 0.5 and pl.manual_hold == 0.0 and pl.manual_breath_s == isync.BUZZ_BREATH_S[0]
+    assert srv._manual["breath_s"] == isync.BUZZ_BREATH_S[0] and not pl.manual_enabled
+    await srv._handle(None, {"type": "manual", "breathS": 0})
+    assert pl.manual_breath_s == 0.0, "0 turns the breathing off"
+    # off by default: a 1.47 train draws exactly as before (no phrase fields, the old numbers)
+    q = isync.FunscriptPlayer(FakeBP([GUSH]))
+    assert not q._buzz_phrased()
+    print(f"   worst {worst} commands in any second; high tide {hi} vs low tide {lo} buzzes; fields clamped  OK")
+asyncio.run(_tidal_budget())
+
+print("75. Stop Backend reaches _panic: SIGTERM sets the stop event and the shutdown panics before it disconnects")
+src = open(os.path.join(_HERE, "IntifaceSync.py"), encoding="utf-8").read()
+i = src.index("    async def run(self)")
+body = src[i:src.index("\n    async def ", i + 10) if "\n    async def " in src[i + 10:] else len(src)]
+body = body[:body.index("\n# ")] if "\n# " in body else body
+assert "add_signal_handler(signal.SIGTERM, stop_event.set)" in body
+k = body.index("await stop_event.wait()")
+rest = body[k:]
+assert rest.index('await self._panic("backend shutdown")') < rest.index("await self.bp.disconnect()"), "panic before the link goes"
+fn = src[src.index("def stop_backend("):src.index("def _wait_pid_gone(")]
+assert fn.index("signal.SIGTERM") < fn.index("signal.SIGKILL"), "SIGTERM first; SIGKILL only if it did not go"
+print("   SIGTERM -> stop event -> _panic('backend shutdown') -> disconnect; the page also sends halt first  OK")
+
+print("\nFORK 1.49 TESTS PASSED")
