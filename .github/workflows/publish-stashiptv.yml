@@ -37,6 +37,7 @@ concurrency:
 
 jobs:
   test:
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -55,17 +56,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Install Linux test FFmpeg
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
-      - name: Install Windows test FFmpeg
-        if: runner.os == 'Windows'
+      - name: Install portable test FFmpeg
+        timeout-minutes: 5
         run: python -m pip install imageio-ffmpeg==0.6.0
-      - name: Configure Linux real-media tests
-        if: runner.os == 'Linux'
-        run: echo 'FFMPEG_TEST_PATH=/usr/bin/ffmpeg' >> "$GITHUB_ENV"
-      - name: Configure Windows real-media tests
-        if: runner.os == 'Windows'
+      - name: Configure real-media tests
         run: python -c "import os,imageio_ffmpeg; f=open(os.environ['GITHUB_ENV'],'a',encoding='utf-8'); f.write('FFMPEG_TEST_PATH='+imageio_ffmpeg.get_ffmpeg_exe()+'\n'); f.close()"
       - name: Install dependencies
         working-directory: plugins/StashIP-TV
@@ -101,6 +95,7 @@ jobs:
         run: python tools/package_funscript_ollama.py --output-dir dist --revision ci --check
 
   test_intiface:
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -115,6 +110,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install Intiface test dependencies
+        run: python -m pip install -r plugins/intifacesyncer/requirements-test.txt
+      - name: Test Intiface vibration engine
+        run: python plugins/intifacesyncer/test_vibe.py
+      - name: Test Intiface bridge and Stash connection
+        run: python plugins/intifacesyncer/test_bridge.py
       - name: Check Intiface Sync JavaScript syntax
         run: node --check plugins/intifacesyncer/IntifaceSync.js
       - name: Validate Intiface Sync package and Python syntax
