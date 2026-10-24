@@ -2,15 +2,23 @@
   name: StashIP-TV
   metadata:
     description: StashIP-TV live channels and EPG for Jellyfin, Stashy, Plex and Emby.
-  version: "1.5.2-889b44c3d8a4"
-  date: "2026-10-17 14:47:40"
+  version: "1.5.2-1e8f6a772bae"
+  date: "2026-10-24 21:24:42"
   path: StashIP-TV.zip
-  sha256: e81290e332caa1e2b5793db3837750b7a20efcfd8fd2d856a3695e6129a86349
+  sha256: b9e0a53ce6085086fb4f5b0d81afbce3bfcb67cc9625ae845ff88e9ee9344bcd
 - id: FunscriptOllama
   name: Funscript Ollama
   metadata:
     description: Ollama or account-based ChatGPT/Antigravity CLI vision with Haven motion, VR, extra axes and chapters.
-  version: "0.5.2-889b44c3d8a4"
-  date: "2026-10-17 14:47:40"
+  version: "0.5.2-1e8f6a772bae"
+  date: "2026-10-24 21:24:42"
   path: FunscriptOllama.zip
-  sha256: 77a09afc4ba3efdd7eca52ba12a121baf66a14893518755fa3684500d399c61f
+  sha256: 90c4805783facf46683f880d7855b3f6e7880d41c5e22c99a79ca41e58e44321
+- id: IntifaceSync
+  name: Intiface Sync
+  metadata:
+    description: Funscript synchronization with Intiface Central, Buttplug.io and The Handy, including vibrating devices.
+  version: "1.51-vibe-1e8f6a772bae"
+  date: "2026-10-24 21:24:42"
+  path: IntifaceSync.zip
+  sha256: c8c1400877342d83888889504270c74c7b1bc50ba8f93a5da433d97e2a389b26
