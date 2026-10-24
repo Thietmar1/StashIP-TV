@@ -9,6 +9,18 @@ adding support for vibrating toys, which the original did not drive.
 
 ## Setup
 
+Install **Intiface Sync** in Stash under **Settings > Plugins > Available Plugins**.
+Add this source if it is not already configured, then refresh its packages:
+
+```text
+https://raw.githubusercontent.com/Thietmar1/StashIP-TV/tvguide-iptv/index.yml
+```
+
+The package includes the Python backend and browser script. Python 3 with pip
+must be available to the Stash process (inside the container when using Docker).
+The backend currently installs `websockets` and `aiohttp` into its plugin folder
+on first start if they are missing.
+
 1. Install and run **Intiface Central**, and connect your toy to it.
 2. In Stash: **Settings > Plugins > IntifaceSync**, set the server URL if it is
    not `ws://localhost:12345`.

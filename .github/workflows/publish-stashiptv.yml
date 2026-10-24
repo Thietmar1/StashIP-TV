@@ -6,8 +6,10 @@ on:
     paths:
       - 'plugins/StashIP-TV/**'
       - 'plugins/FunscriptOllama/**'
+      - 'plugins/intifacesyncer/**'
       - 'tools/package_stashiptv.py'
       - 'tools/package_funscript_ollama.py'
+      - 'tools/package_intifacesyncer.py'
       - 'tools/package_catalog.py'
       - '.github/workflows/publish-stashiptv.yml'
       - 'README.md'
@@ -16,8 +18,10 @@ on:
     paths:
       - 'plugins/StashIP-TV/**'
       - 'plugins/FunscriptOllama/**'
+      - 'plugins/intifacesyncer/**'
       - 'tools/package_stashiptv.py'
       - 'tools/package_funscript_ollama.py'
+      - 'tools/package_intifacesyncer.py'
       - 'tools/package_catalog.py'
       - '.github/workflows/publish-stashiptv.yml'
       - 'README.md'
@@ -96,9 +100,29 @@ jobs:
       - name: Validate Funscript package
         run: python tools/package_funscript_ollama.py --output-dir dist --revision ci --check
 
+  test_intiface:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.11', '3.13']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check Intiface Sync JavaScript syntax
+        run: node --check plugins/intifacesyncer/IntifaceSync.js
+      - name: Validate Intiface Sync package and Python syntax
+        run: python tools/package_intifacesyncer.py --output-dir dist --revision ci --check
+
   publish:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: [test, test_funscript]
+    needs: [test, test_funscript, test_intiface]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -112,7 +136,7 @@ jobs:
       - name: Build
         working-directory: plugins/StashIP-TV
         run: npm ci && npm run build
-      - name: Package both plugins and shared Stash index
+      - name: Package all plugins and shared Stash index
         run: python3 tools/package_catalog.py --output-dir dist --revision "${GITHUB_SHA::12}" --check
       - name: Update shared source and compatible Funscript source
         run: |
@@ -138,5 +162,5 @@ jobs:
               git push origin "HEAD:refs/heads/$branch"
             )
           }
-          publish_source tvguide-iptv install-source dist/index.yml dist/StashIP-TV.zip dist/FunscriptOllama.zip
+          publish_source tvguide-iptv install-source dist/index.yml dist/StashIP-TV.zip dist/FunscriptOllama.zip dist/IntifaceSync.zip
           publish_source funscript-ollama legacy-install-source dist/funscript/index.yml dist/FunscriptOllama.zip
